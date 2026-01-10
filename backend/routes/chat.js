@@ -1,6 +1,6 @@
 import express from 'express';
 import Chat from '../models/Chat.js';
-import { streamOpenAIResponse, generateEmbedding } from '../utils/openai.js';
+import { streamChatCompletion, createChatCompletion } from '../utils/openai.js';
 
 const router = express.Router();
 
@@ -8,50 +8,52 @@ const router = express.Router();
 router.post('/', async (req, res) => {
   try {
     const { message, sessionId } = req.body;
-
+    
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'Message cannot be empty' });
     }
-
+    
     // Create/get session
     let chat = sessionId ? await Chat.findById(sessionId) : null;
     if (!chat) {
       chat = new Chat({ messages: [] });
     }
-
+    
     // Add user message
     chat.messages.push({
       role: 'user',
       content: message,
       timestamp: new Date(),
     });
-
     await chat.save();
-
+    
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Access-Control-Allow-Origin', '*');
-
+    
     // Stream response from OpenAI
-    await streamOpenAIResponse(
+    let fullResponse = '';
+    await streamChatCompletion(
       chat.messages,
       (chunk) => {
+        fullResponse += chunk;
         res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
-      },
-      async (fullResponse) => {
-        // Save AI response
-        chat.messages.push({
-          role: 'assistant',
-          content: fullResponse,
-          timestamp: new Date(),
-        });
-        await chat.save();
-        res.write(`data: ${JSON.stringify({ done: true, sessionId: chat._id })}\n\n`);
-        res.end();
       }
     );
+    
+    // Save AI response
+    chat.messages.push({
+      role: 'assistant',
+      content: fullResponse,
+      timestamp: new Date(),
+    });
+    await chat.save();
+    
+    res.write(`data: ${JSON.stringify({ done: true, sessionId: chat._id })}\n\n`);
+    res.end();
+    
   } catch (error) {
     console.error('Chat streaming error:', error);
     res.status(500).json({ error: 'Failed to process chat request' });
@@ -62,16 +64,16 @@ router.post('/', async (req, res) => {
 router.get('/history', async (req, res) => {
   try {
     const { sessionId } = req.query;
-
+    
     if (!sessionId) {
       return res.status(400).json({ error: 'Session ID required' });
     }
-
+    
     const chat = await Chat.findById(sessionId);
     if (!chat) {
       return res.status(404).json({ error: 'Session not found' });
     }
-
+    
     res.json({
       sessionId: chat._id,
       messages: chat.messages,
@@ -91,7 +93,7 @@ router.get('/sessions', async (req, res) => {
       .select('_id messages createdAt updatedAt')
       .sort({ updatedAt: -1 })
       .limit(50);
-
+    
     res.json(
       sessions.map((session) => ({
         sessionId: session._id,
@@ -111,44 +113,36 @@ router.get('/sessions', async (req, res) => {
 router.post('/complete', async (req, res) => {
   try {
     const { message, sessionId } = req.body;
-
+    
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'Message cannot be empty' });
     }
-
+    
     let chat = sessionId ? await Chat.findById(sessionId) : null;
     if (!chat) {
       chat = new Chat({ messages: [] });
     }
-
+    
     chat.messages.push({
       role: 'user',
       content: message,
       timestamp: new Date(),
     });
-
     await chat.save();
-
+    
     // Get full response
-    let fullResponse = '';
-    await streamOpenAIResponse(
-      chat.messages,
-      (chunk) => {
-        fullResponse += chunk;
-      },
-      async (response) => {
-        chat.messages.push({
-          role: 'assistant',
-          content: response,
-          timestamp: new Date(),
-        });
-        await chat.save();
-      }
-    );
-
+    const response = await createChatCompletion(chat.messages);
+    
+    chat.messages.push({
+      role: 'assistant',
+      content: response.content,
+      timestamp: new Date(),
+    });
+    await chat.save();
+    
     res.json({
       sessionId: chat._id,
-      response: fullResponse,
+      response: response.content,
       messages: chat.messages,
     });
   } catch (error) {
@@ -162,11 +156,11 @@ router.delete('/history/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await Chat.findByIdAndDelete(id);
-
+    
     if (!result) {
       return res.status(404).json({ error: 'Session not found' });
     }
-
+    
     res.json({ message: 'Session deleted successfully' });
   } catch (error) {
     console.error('Delete error:', error);
@@ -178,21 +172,21 @@ router.delete('/history/:id', async (req, res) => {
 router.post('/clear', async (req, res) => {
   try {
     const { sessionId } = req.body;
-
+    
     if (!sessionId) {
       return res.status(400).json({ error: 'Session ID required' });
     }
-
+    
     const chat = await Chat.findByIdAndUpdate(
       sessionId,
       { messages: [] },
       { new: true }
     );
-
+    
     if (!chat) {
       return res.status(404).json({ error: 'Session not found' });
     }
-
+    
     res.json({ message: 'Session cleared successfully', sessionId: chat._id });
   } catch (error) {
     console.error('Clear error:', error);
