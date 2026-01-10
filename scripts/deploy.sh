@@ -13,8 +13,13 @@ echo "Deploying to $ENV..."
 
 aws s3 sync frontend/dist/ s3://$BUCKET/ --delete
 
-aws cloudfront create-invalidation \
-  --distribution-id $CLOUDFRONT_DISTRIBUTION_ID \
-  --paths "/*"
-
+# Invalidate CloudFront cache (optional)
+if [ -n "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
+  aws cloudfront create-invalidation \
+    --distribution-id $CLOUDFRONT_DISTRIBUTION_ID \
+    --paths "/*"
+  echo "✅ CloudFront cache invalidated"
+else
+  echo "ℹ️  No CloudFront distribution configured, skipping cache invalidation"
+fi
 echo "✅ Deployment complete"
