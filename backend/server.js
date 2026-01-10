@@ -124,24 +124,45 @@ try {
 }
 
 // Chat API Endpoint - Mock implementation
-app.post('/api/chat/message', (req, res) => {
+// Chat API Endpoint - Server-Sent Events (SSE) Streaming
+app.post('/api/chat', (req, res) => {
   const { message, sessionId } = req.body;
-  console.log(`📨 Chat message received: "${message}" from session ${sessionId}`);
   
   if (!message || message.trim().length === 0) {
     return res.status(400).json({ error: 'Message cannot be empty' });
   }
   
-  // Mock AI response - simple echo with modification
-  const mockResponse = `I received your message: "${message}". This is a mock response from AION v1 backend.`;
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
   
-  res.json({
-    success: true,
-    response: mockResponse,
-    timestamp: new Date().toISOString(),
-    sessionId: sessionId || 'unknown'
-  });
+  console.log(`📨 Chat message received: "${message}" from session ${sessionId}`);
+  
+  // Simulate streaming response
+  const mockResponse = `I received your message: "${message}". This is a mock response from AION v1 backend with SSE streaming.`;
+  
+  // Send response in chunks with SSE format
+  let index = 0;
+  const chunkSize = 5;
+  
+  const sendChunk = () => {
+    if (index < mockResponse.length) {
+      const chunk = mockResponse.slice(index, index + chunkSize);
+      res.write(`data: ${JSON.stringify({ content: chunk, done: false })}\n\n`);
+      index += chunkSize;
+      setTimeout(sendChunk, 50); // Small delay for streaming effect
+    } else {
+      // Send final message
+      res.write(`data: ${JSON.stringify({ done: true, timestamp: new Date().toISOString() })}\n\n`);
+      res.end();
+    }
+  };
+  
+  sendChunk();
 });
+
 
 
 try {
