@@ -39,7 +39,7 @@ jobs:
           aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           application_name: aion-backend
-          environment_name: Aion-backend-env
+          environment_name: Aion-backend-env-1
           version_label: backend-${{ steps.timestamp.outputs.time }}-${{ github.sha }}
           region: us-east-1
           deployment_package: backend-deploy.zip
@@ -49,5 +49,5 @@ jobs:
       - name: Deployment complete
         run: |
           echo "✅ Backend deployed successfully to Elastic Beanstalk!"
-          echo "🌐 URL: http://Aion-backend-env.eba-4uswimrs.us-east-1.elasticbeanstalk.com"
+          echo "🌐 URL: http://Aion-backend-env-1.eba-4uswimrs.us-east-1.elasticbeanstalk.com"
           echo "📦 Version: backend-${{ steps.timestamp.outputs.time }}-${{ github.sha }}"
