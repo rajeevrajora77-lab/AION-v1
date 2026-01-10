@@ -11,7 +11,7 @@ fi
 
 echo "Deploying to $ENV..."
 
-aws s3 sync dist/ s3://$BUCKET/ --delete
+aws s3 sync frontend/dist/ s3://$BUCKET/ --delete
 
 aws cloudfront create-invalidation \
   --distribution-id $CLOUDFRONT_DISTRIBUTION_ID \
