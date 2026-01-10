@@ -26,4 +26,4 @@ jobs:
 
       - name: Verify build
         run: bash scripts/verify-build.sh
-        working-directory: frontend
+
