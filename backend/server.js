@@ -3,11 +3,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
-// import chatRoutes from './routes/chat.js';
-// import searchRoutes from './routes/search.js';
-// import voiceRoutes from './routes/voice.js';
-// import { errorHandler } from './middleware/errorHandler.js';
-// import rateLimiter from './middleware/rateLimiter.js';
+import chatRoutes from './routes/chat.js';
+import searchRoutes from './routes/search.js';
+import voiceRoutes from './routes/voice.js';
+import { errorHandler } from './middleware/errorHandler.js';
+import rateLimiter from './middleware/rateLimiter.js';
 
 dotenv.config();
 
@@ -117,21 +117,21 @@ mongoose.connection.on('disconnected', () => {
 
 // API Routes - wrapped in try-catch for safety
 try {
-    // app.use('/api/chat', chatRoutes);
+ app.use('/api/chat', chatRoutes);
   console.log('✅ Chat routes loaded');
 } catch (error) {
   console.error('❌ Failed to load chat routes:', error.message);
 }
 
 try {
-    // app.use('/api/search', searchRoutes);
+ app.use('/api/search', searchRoutes);
   console.log('✅ Search routes loaded');
 } catch (error) {
   console.error('❌ Failed to load search routes:', error.message);
 }
 
 try {
-    // app.use('/api/voice', voiceRoutes);
+ app.use('/api/voice', voiceRoutes);
   console.log('✅ Voice routes loaded');
 } catch (error) {
   console.error('❌ Failed to load voice routes:', error.message);
