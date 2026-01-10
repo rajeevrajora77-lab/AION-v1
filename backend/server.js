@@ -3,9 +3,9 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
-// import chatRoutes from './routes/chat.js';
-// import searchRoutes from './routes/search.js';
-// import voiceRoutes from './routes/voice.js';
+import chatRoutes from './routes/chat.js';
+import searchRoutes from './routes/search.js';
+import voiceRoutes from './routes/voice.js';
 // import { errorHandler } from './middleware/errorHandler.js';
 // import rateLimiter from './middleware/rateLimiter.js';
 
@@ -33,6 +33,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Rate limiting
 // app.use(rateLimiter);
+
 // Root route - API information
 app.get('/', (req, res) => {
   res.json({
@@ -102,8 +103,8 @@ mongoose
     console.log('✅ MongoDB connected successfully');
   })
   .catch((err) => {
-    console.error('⚠️  MongoDB connection failed:', err.message);
-    console.log('⚠️  Server will continue without database. Chat history will be unavailable.');
+    console.error('⚠️ MongoDB connection failed:', err.message);
+    console.log('⚠️ Server will continue without database. Chat history will be unavailable.');
   });
 
 // MongoDB connection error handling
@@ -112,68 +113,26 @@ mongoose.connection.on('error', (err) => {
 });
 
 mongoose.connection.on('disconnected', () => {
-  console.warn('⚠️  MongoDB disconnected');
+  console.warn('⚠️ MongoDB disconnected');
 });
 
-// API Routes - wrapped in try-catch for safety
+// API Routes
 try {
- app.use('/api/chat', chatRoutes);
+  app.use('/api/chat', chatRoutes);
   console.log('✅ Chat routes loaded');
 } catch (error) {
   console.error('❌ Failed to load chat routes:', error.message);
 }
 
-// Chat API Endpoint - Mock implementation
-// Chat API Endpoint - Server-Sent Events (SSE) Streaming
-app.post('/api/chat', (req, res) => {
-  const { message, sessionId } = req.body;
-  
-  if (!message || message.trim().length === 0) {
-    return res.status(400).json({ error: 'Message cannot be empty' });
-  }
-  
-  // Set SSE headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
-  
-  console.log(`📨 Chat message received: "${message}" from session ${sessionId}`);
-  
-  // Simulate streaming response
-  const mockResponse = `I received your message: "${message}". This is a mock response from AION v1 backend with SSE streaming.`;
-  
-  // Send response in chunks with SSE format
-  let index = 0;
-  const chunkSize = 5;
-  
-  const sendChunk = () => {
-    if (index < mockResponse.length) {
-      const chunk = mockResponse.slice(index, index + chunkSize);
-      res.write(`data: ${JSON.stringify({ content: chunk, done: false })}\n\n`);
-      index += chunkSize;
-      setTimeout(sendChunk, 50); // Small delay for streaming effect
-    } else {
-      // Send final message
-      res.write(`data: ${JSON.stringify({ done: true, timestamp: new Date().toISOString() })}\n\n`);
-      res.end();
-    }
-  };
-  
-  sendChunk();
-});
-
-
-
 try {
- app.use('/api/search', searchRoutes);
+  app.use('/api/search', searchRoutes);
   console.log('✅ Search routes loaded');
 } catch (error) {
   console.error('❌ Failed to load search routes:', error.message);
 }
 
 try {
- app.use('/api/voice', voiceRoutes);
+  app.use('/api/voice', voiceRoutes);
   console.log('✅ Voice routes loaded');
 } catch (error) {
   console.error('❌ Failed to load voice routes:', error.message);
@@ -190,10 +149,11 @@ app.use((req, res) => {
 });
 
 // Global error handler
-  // app.use(errorHandler);
+// app.use(errorHandler);
+
 // Graceful shutdown handlers
 process.on('SIGTERM', () => {
-  console.log('⚠️  SIGTERM received, closing server gracefully');
+  console.log('⚠️ SIGTERM received, closing server gracefully');
   if (mongoose.connection.readyState === 1) {
     mongoose.connection.close(false, () => {
       console.log('✅ MongoDB connection closed');
@@ -205,7 +165,7 @@ process.on('SIGTERM', () => {
 });
 
 process.on('SIGINT', () => {
-  console.log('⚠️  SIGINT received, closing server gracefully');
+  console.log('⚠️ SIGINT received, closing server gracefully');
   if (mongoose.connection.readyState === 1) {
     mongoose.connection.close(false, () => {
       console.log('✅ MongoDB connection closed');
