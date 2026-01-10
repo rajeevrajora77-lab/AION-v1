@@ -1,0 +1,17 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag Release
+        run: |
+          VERSION=$(date +%Y.%m.%d.%H%M)
+          git tag v$VERSION
+          git push origin v$VERSION
