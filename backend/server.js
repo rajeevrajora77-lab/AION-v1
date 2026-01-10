@@ -123,6 +123,27 @@ try {
   console.error('❌ Failed to load chat routes:', error.message);
 }
 
+// Chat API Endpoint - Mock implementation
+app.post('/api/chat/message', (req, res) => {
+  const { message, sessionId } = req.body;
+  console.log(`📨 Chat message received: "${message}" from session ${sessionId}`);
+  
+  if (!message || message.trim().length === 0) {
+    return res.status(400).json({ error: 'Message cannot be empty' });
+  }
+  
+  // Mock AI response - simple echo with modification
+  const mockResponse = `I received your message: "${message}". This is a mock response from AION v1 backend.`;
+  
+  res.json({
+    success: true,
+    response: mockResponse,
+    timestamp: new Date().toISOString(),
+    sessionId: sessionId || 'unknown'
+  });
+});
+
+
 try {
  app.use('/api/search', searchRoutes);
   console.log('✅ Search routes loaded');
