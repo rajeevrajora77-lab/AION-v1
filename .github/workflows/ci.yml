@@ -9,7 +9,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-      steps:
+    steps:
       - uses: actions/checkout@v4
 
       - name: Setup Node
@@ -19,11 +19,11 @@ jobs:
 
       - name: Install dependencies
         run: npm install
-      working-directory: frontend
+        working-directory: frontend
 
       - name: Build frontend
         run: npm run build
-      working-directory: frontend
+        working-directory: frontend
 
       - name: Verify build
         run: bash scripts/verify-build.sh
