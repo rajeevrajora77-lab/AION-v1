@@ -3,11 +3,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
-import chatRoutes from './routes/chat.js';
-import searchRoutes from './routes/search.js';
-import voiceRoutes from './routes/voice.js';
-import { errorHandler } from './middleware/errorHandler.js';
-import rateLimiter from './middleware/rateLimiter.js';
+// import chatRoutes from './routes/chat.js';
+// import searchRoutes from './routes/search.js';
+// import voiceRoutes from './routes/voice.js';
+// import { errorHandler } from './middleware/errorHandler.js';
+// import rateLimiter from './middleware/rateLimiter.js';
 
 dotenv.config();
 
