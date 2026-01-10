@@ -3,11 +3,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
-import chatRoutes from './routes/chat.js';
-import searchRoutes from './routes/search.js';
-import voiceRoutes from './routes/voice.js';
-import { errorHandler } from './middleware/errorHandler.js';
-import rateLimiter from './middleware/rateLimiter.js';
+// import chatRoutes from './routes/chat.js';
+// import searchRoutes from './routes/search.js';
+// import voiceRoutes from './routes/voice.js';
+// import { errorHandler } from './middleware/errorHandler.js';
+// import rateLimiter from './middleware/rateLimiter.js';
 
 dotenv.config();
 
@@ -32,8 +32,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Rate limiting
-app.use(rateLimiter);
-
+// app.use(rateLimiter);
 // Root route - API information
 app.get('/', (req, res) => {
   res.json({
