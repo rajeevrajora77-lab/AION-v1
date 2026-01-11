@@ -1,4 +1,5 @@
 import express from 'express';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
@@ -141,6 +142,22 @@ mongoose.connection.on('disconnected', () => {
 
 // API Routes
 try {
+  // Shadow proxy for new Python FastAPI backend
+app.use('/__aion_shadow/api', createProxyMiddleware({
+  target: 'http://localhost:8000',
+  changeOrigin: true,
+  pathRewrite: {
+    '^/__aion_shadow/api': '',
+  },
+  onError: (err, req, res) => {
+    console.warn('Shadow API proxy error:', err.message);
+    res.status(503).json({error: 'Shadow API unavailable'});
+  }
+}));
+
+// Serve new AION UI from shadow path
+app.use('/__aion_shadow/ui', express.static('frontend/dist'));
+
   app.use('/api/chat', chatRoutes);
   console.log('✅ Chat routes loaded');
 } catch (error) {
