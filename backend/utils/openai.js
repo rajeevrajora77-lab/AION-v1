@@ -1,11 +1,15 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
+import withRetry from './retry.js';
+import withTimeout from './timeoutWrapper.js';
+import CircuitBreaker from './circuitBreaker.js';
 
 dotenv.config();
 
 // Lazy initialization - client is only created when first needed
 let openai = null;
 let initializationAttempted = false;
+const openaiCircuitBreaker = new CircuitBreaker(3, 30000);
 
 function getOpenAIClient() {
   if (initializationAttempted && !openai) {
@@ -16,7 +20,7 @@ function getOpenAIClient() {
     initializationAttempted = true;
     
     if (!process.env.OPENAI_API_KEY) {
-      console.warn('⚠️  OPENAI_API_KEY not set. AI features will be unavailable.');
+      console.warn('\u26A0\uFE0F OPENAI_API_KEY not set. AI features will be unavailable.');
       return null;
     }
     
@@ -24,9 +28,9 @@ function getOpenAIClient() {
       openai = new OpenAI({
         apiKey: process.env.OPENAI_API_KEY,
       });
-      console.log('✅ OpenAI client initialized successfully');
+      console.log('\u2705 OpenAI client initialized successfully');
     } catch (error) {
-      console.error('❌ OpenAI initialization failed:', error.message);
+      console.error('\u274C OpenAI initialization failed:', error.message);
       return null;
     }
   }
@@ -41,26 +45,37 @@ export async function streamChatCompletion(messages, onChunk) {
     throw new Error('OpenAI service is unavailable. Please ensure OPENAI_API_KEY is configured.');
   }
   
+  // Wrap with retry, timeout, and circuit breaker
+  const executeWithResilience = async () => {
+    return withTimeout(
+      openaiCircuitBreaker.exec(async () => {
+        const stream = await client.chat.completions.create({
+          model: process.env.OPENAI_MODEL || 'gpt-4',
+          messages: messages,
+          max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS || '2000'),
+          temperature: 0.7,
+          stream: true,
+        });
+        
+        let fullResponse = '';
+        
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content;
+          if (content) {
+            fullResponse += content;
+            if (onChunk) onChunk(content);
+          }
+        }
+        
+        return fullResponse;
+      }),
+      30000,
+      'OpenAI streaming request timed out'
+    );
+  };
+  
   try {
-    const stream = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4',
-      messages: messages,
-      max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS || '2000'),
-      temperature: 0.7,
-      stream: true,
-    });
-    
-    let fullResponse = '';
-    
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content;
-      if (content) {
-        fullResponse += content;
-        if (onChunk) onChunk(content);
-      }
-    }
-    
-    return fullResponse;
+    return await withRetry(executeWithResilience, 2, 1000);
   } catch (error) {
     console.error('OpenAI streaming error:', error);
     
@@ -82,19 +97,30 @@ export async function createChatCompletion(messages) {
     throw new Error('OpenAI service is unavailable. Please ensure OPENAI_API_KEY is configured.');
   }
   
+  // Wrap with retry, timeout, and circuit breaker
+  const executeWithResilience = async () => {
+    return withTimeout(
+      openaiCircuitBreaker.exec(async () => {
+        const completion = await client.chat.completions.create({
+          model: process.env.OPENAI_MODEL || 'gpt-4',
+          messages: messages,
+          max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS || '2000'),
+          temperature: 0.7,
+        });
+        
+        return {
+          content: completion.choices[0].message.content,
+          model: completion.model,
+          usage: completion.usage,
+        };
+      }),
+      30000,
+      'OpenAI completion request timed out'
+    );
+  };
+  
   try {
-    const completion = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4',
-      messages: messages,
-      max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS || '2000'),
-      temperature: 0.7,
-    });
-    
-    return {
-      content: completion.choices[0].message.content,
-      model: completion.model,
-      usage: completion.usage,
-    };
+    return await withRetry(executeWithResilience, 2, 1000);
   } catch (error) {
     console.error('OpenAI completion error:', error);
     
@@ -116,13 +142,24 @@ export async function createEmbedding(text) {
     throw new Error('OpenAI service is unavailable. Please ensure OPENAI_API_KEY is configured.');
   }
   
+  // Wrap with retry, timeout, and circuit breaker
+  const executeWithResilience = async () => {
+    return withTimeout(
+      openaiCircuitBreaker.exec(async () => {
+        const response = await client.embeddings.create({
+          model: 'text-embedding-ada-002',
+          input: text,
+        });
+        
+        return response.data[0].embedding;
+      }),
+      30000,
+      'OpenAI embedding request timed out'
+    );
+  };
+  
   try {
-    const response = await client.embeddings.create({
-      model: 'text-embedding-ada-002',
-      input: text,
-    });
-    
-    return response.data[0].embedding;
+    return await withRetry(executeWithResilience, 2, 1000);
   } catch (error) {
     console.error('OpenAI embedding error:', error);
     throw new Error(`Embedding service error: ${error.message}`);
