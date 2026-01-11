@@ -8,6 +8,9 @@ import searchRoutes from './routes/search.js';
 import voiceRoutes from './routes/voice.js';
 // import { errorHandler } from './middleware/errorHandler.js';
 // import rateLimiter from './middleware/rateLimiter.js';
+import rateLimit from 'express-rate-limit';
+import { errorHandler } from './middleware/errorHandler.js';
+import { requestLogger } from './middleware/requestLogger.js';
 
 dotenv.config();
 
@@ -42,6 +45,10 @@ const corsOptions = {
 }
 
 app.use(cors(corsOptions));
+app.use(requestLogger);
+
+// Rate limiting
+app.use(rateLimit({\n  windowMs: 15 * 60 * 1000,\n  max: 100,\n  message: 'Too many requests, please try again later.',\n}));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -111,7 +118,7 @@ app.get('/status', (req, res) => {
 });
 
 // MongoDB connection with graceful failure handling
-mongoose
+// Ensure MONGODB_URI is set\nif (!process.env.MONGODB_URI) {\n  console.error('❌ MONGODB_URI environment variable is not set');\n  process.exit(1);\n}\n\nmongoose
   .connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/aion', {
     serverSelectionTimeoutMS: 5000,
   })
@@ -205,5 +212,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📊 Status: http://localhost:${PORT}/status`);
   console.log('='.repeat(50));
 });
+
+// Global error handler middleware (MUST be last)
+app.use(errorHandler);
 
 export default app;
