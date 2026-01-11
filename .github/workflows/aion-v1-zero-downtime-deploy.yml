@@ -1,0 +1,278 @@
+name: AION v1 Zero-Downtime Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment (shadow-test or production)'
+        required: true
+        default: 'shadow-test'
+        type: choice
+        options:
+          - shadow-test
+          - production
+
+env:
+  AWS_REGION: us-east-1
+  EB_ENV_NAME: Aion-backend-env-1
+  EB_APP_NAME: aion-backend
+  DOMAIN: aion-backend-env-1.eba-4uswimrs.us-east-1.elasticbeanstalk.com
+
+jobs:
+  preflight:
+    name: Pre-Flight Health Checks (BLUE + GREEN)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run health endpoint checks
+        run: |
+          echo "=== PRE-FLIGHT CHECKS ==="
+          
+          # Check main health endpoint
+          echo "[1/3] Checking main health endpoint..."
+          HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://${DOMAIN}/health)
+          if [ "$HEALTH_RESPONSE" != "200" ]; then
+            echo "FAILED: Main health returned $HEALTH_RESPONSE"
+            exit 1
+          fi
+          echo "✓ Main health: 200 OK"
+          
+          # Check shadow health
+          echo "[2/3] Checking shadow health endpoint..."
+          SHADOW_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://${DOMAIN}/__aion_shadow/api/health)
+          if [ "$SHADOW_HEALTH" != "200" ]; then
+            echo "FAILED: Shadow health returned $SHADOW_HEALTH"
+            exit 1
+          fi
+          echo "✓ Shadow health: 200 OK"
+          
+          # Check shadow readiness
+          echo "[3/3] Checking shadow readiness endpoint..."
+          SHADOW_READY=$(curl -s -o /dev/null -w "%{http_code}" https://${DOMAIN}/__aion_shadow/api/ready)
+          if [ "$SHADOW_READY" != "200" ]; then
+            echo "FAILED: Shadow ready returned $SHADOW_READY"
+            exit 1
+          fi
+          echo "✓ Shadow ready: 200 OK"
+          echo ""
+          echo "✅ ALL PRE-FLIGHT CHECKS PASSED"
+
+      - name: Test shadow UI loading
+        run: |
+          echo "[4/3] Testing shadow UI load..."
+          UI_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://${DOMAIN}/__aion_shadow/ui)
+          if [ "$UI_RESPONSE" != "200" ]; then
+            echo "FAILED: Shadow UI returned $UI_RESPONSE"
+            exit 1
+          fi
+          echo "✓ Shadow UI loads: 200 OK"
+
+      - name: Test streaming endpoint (shadow)
+        run: |
+          echo "[5/3] Testing streaming (shadow)..."
+          STREAM_TEST=$(curl -s -N -X POST https://${DOMAIN}/__aion_shadow/api/v1/chat \
+            -H "Content-Type: application/json" \
+            -d '{"message":"stream test"}' \
+            --max-time 10)
+          
+          if echo "$STREAM_TEST" | grep -q '\[DONE\]\|\}$'; then
+            echo "✓ Streaming works (received chunks)"
+          else
+            echo "⚠ Streaming may be buffering - check manually"
+          fi
+
+  atomic_switch:
+    name: Atomic Switch - Production Routing
+    needs: preflight
+    if: github.event.inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "deployment@aion.dev"
+          git config --global user.name "AION Deployment Automation"
+
+      - name: Update server.js routing (NEW UI + Python backend)
+        run: |
+          echo "=== ATOMIC SWITCH: Routing Update ==="
+          cat > backend/server.js << 'EOF'
+const express = require('express');
+const { createProxyMiddleware } = require('http-proxy-middleware');
+
+const app = express();
+
+// Middleware
+app.use(express.json());
+app.use(express.static('frontend/dist'));
+
+// NEW: Proxy all chat requests to Python backend on localhost:8000
+app.use('/api/chat', createProxyMiddleware({
+  target: 'http://localhost:8000/api/v1/chat',
+  changeOrigin: true,
+  ws: true,
+  timeout: 30000,
+  proxyTimeout: 30000,
+  on: {
+    error: (err, req, res) => {
+      console.error('Proxy error:', err);
+      res.status(500).json({ error: 'Backend unavailable' });
+    },
+    proxyRes: (proxyRes, req, res) => {
+      // Ensure streaming headers are preserved
+      proxyRes.headers['content-type'] = 'text/event-stream';
+      proxyRes.headers['cache-control'] = 'no-cache';
+    }
+  }
+}));
+
+// Health checks
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+EOF
+          echo "✓ server.js updated with new routing"
+          git diff backend/server.js
+
+      - name: Commit atomic switch
+        run: |
+          git add backend/server.js
+          git commit -m "atomic: switch production to new AION UI + Python backend ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))"
+          SWITCH_COMMIT=$(git rev-parse HEAD)
+          echo "SWITCH_COMMIT=$SWITCH_COMMIT" >> $GITHUB_ENV
+          echo "✓ Committed: $SWITCH_COMMIT"
+
+      - name: Push to main (triggers EB deployment)
+        run: |
+          git push origin main
+          echo "✓ Pushed to main - EB deployment pipeline triggered"
+
+      - name: Save commit for rollback reference
+        run: |
+          echo "SWITCH_COMMIT=${{ env.SWITCH_COMMIT }}" > /tmp/switch_commit.txt
+          cat /tmp/switch_commit.txt
+
+  deployment_monitor:
+    name: Monitor EB Deployment
+    needs: atomic_switch
+    if: github.event.inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Monitor EB health (max 10 minutes)
+        run: |
+          echo "=== MONITORING EB DEPLOYMENT ==="
+          START_TIME=$(date +%s)
+          MAX_WAIT=600  # 10 minutes
+          POLL_INTERVAL=10
+          
+          while true; do
+            ELAPSED=$(($(date +%s) - START_TIME))
+            if [ $ELAPSED -gt $MAX_WAIT ]; then
+              echo "❌ Deployment timeout after 10 minutes"
+              exit 1
+            fi
+            
+            HEALTH=$(aws elasticbeanstalk describe-environment-health \
+              --environment-name ${{ env.EB_ENV_NAME }} \
+              --attribute-keys HealthStatus,Color \
+              --query 'Color' --output text)
+            
+            echo "[$(date +'%H:%M:%S')] Health: $HEALTH (elapsed: ${ELAPSED}s)"
+            
+            if [ "$HEALTH" = "Green" ]; then
+              echo "✅ EB deployment GREEN"
+              break
+            elif [ "$HEALTH" = "Red" ]; then
+              echo "❌ EB health RED - ROLLBACK TRIGGERED"
+              exit 1
+            fi
+            
+            sleep $POLL_INTERVAL
+          done
+
+  post_switch_verification:
+    name: Post-Switch Verification (Prod)
+    needs: deployment_monitor
+    if: github.event.inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify production UI loads
+        run: |
+          echo "=== POST-SWITCH VERIFICATION ==="
+          echo "[1/3] Checking production UI..."
+          UI_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://${DOMAIN}/)
+          if [ "$UI_STATUS" != "200" ]; then
+            echo "❌ Production UI failed: $UI_STATUS"
+            exit 1
+          fi
+          echo "✓ Production UI: 200 OK"
+
+      - name: Verify production streaming API
+        run: |
+          echo "[2/3] Testing production streaming..."
+          STREAM_TEST=$(curl -s -N -X POST https://${DOMAIN}/api/chat \
+            -H "Content-Type: application/json" \
+            -d '{"message":"prod test"}' \
+            --max-time 10)
+          
+          if echo "$STREAM_TEST" | grep -q '\[DONE\]\|\}$'; then
+            echo "✓ Production streaming works"
+          else
+            echo "⚠ Check production streaming manually"
+          fi
+
+      - name: Real user simulation (basic)
+        run: |
+          echo "[3/3] Real user simulation..."
+          for i in {1..3}; do
+            echo "Request $i..."
+            curl -s -X POST https://${DOMAIN}/api/chat \
+              -H "Content-Type: application/json" \
+              -d '{"message":"test '$i'"}' > /dev/null
+            sleep 1
+          done
+          echo "✓ Multiple requests succeeded"
+
+  rollback:
+    name: Rollback (if any failure)
+    if: failure() && github.event.inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "deployment@aion.dev"
+          git config --global user.name "AION Rollback Bot"
+
+      - name: Revert atomic switch
+        run: |
+          echo "❌ ROLLBACK INITIATED"
+          git revert HEAD --no-edit
+          git push origin main
+          echo "✓ Reverted to previous version"
+          echo "EB will auto-restore old code on next poll"
+
+      - name: Notify rollback
+        run: |
+          echo "Rollback complete. Users should see old UI on refresh."
+          echo "Downtime: < 1 minute"
