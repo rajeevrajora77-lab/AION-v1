@@ -20,13 +20,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-           - name: Build frontend
+          
+ - name: Build frontend
    run: |
      cd backend/frontend
      npm install
      npm run build
-     cd ..
+     cd ../..
       
       - name: Create deployment package
         run: |
