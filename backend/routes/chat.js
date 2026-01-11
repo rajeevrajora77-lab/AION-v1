@@ -27,12 +27,12 @@ router.post('/', async (req, res) => {
     });
     await chat.save();
     
-    // Set SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    // SSE headers for streaming
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx/CDN buffering
     // Stream response from OpenAI
     let fullResponse = '';
     await streamChatCompletion(
