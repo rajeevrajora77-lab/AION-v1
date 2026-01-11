@@ -1,16 +1,10 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
-import withRetry from './retry.js';
-import withTimeout from './timeoutWrapper.js';
-import CircuitBreaker from './circuitBreaker.js';
-
 dotenv.config();
 
 // Lazy initialization - client is only created when first needed
 let openai = null;
 let initializationAttempted = false;
-const openaiCircuitBreaker = new CircuitBreaker(3, 30000);
-
 function getOpenAIClient() {
   if (initializationAttempted && !openai) {
     return null; // Already tried and failed
