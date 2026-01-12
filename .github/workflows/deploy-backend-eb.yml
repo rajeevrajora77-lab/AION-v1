@@ -22,11 +22,11 @@ jobs:
           node-version: '20'
           
      - name: Build frontend
-   run: |
-     cd backend/frontend
-     npm install
-     npm run build
-     cd ../..
+       run: |
+           cd backend/frontend
+           npm install
+           npm run build
+           cd ../..
       
       - name: Create deployment package
         run: |
