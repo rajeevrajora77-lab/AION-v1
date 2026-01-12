@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: '20'
           
- - name: Build frontend
+   - name: Build frontend
    run: |
      cd backend/frontend
      npm install
