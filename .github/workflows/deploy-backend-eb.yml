@@ -6,40 +6,38 @@ on:
     paths:
       - 'backend/**'
       - '.github/workflows/deploy-backend-eb.yml'
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          
-     - name: Build frontend
-       run: |
-           cd backend/frontend
-           npm install
-           npm run build
-           cd ../..
-      
+
+      - name: Build frontend
+        run: |
+          cd backend/frontend
+          npm install
+          npm run build
+          cd ../..
+
       - name: Create deployment package
         run: |
           cd backend
-          # Create a clean zip without node_modules
           zip -r ../backend-deploy.zip . -x '*.git*' 'node_modules/*' '.env*'
           cd ..
           ls -lh backend-deploy.zip
-      
+
       - name: Get timestamp
         id: timestamp
         run: echo "time=$(date +'%Y%m%d_%H%M%S')" >> $GITHUB_OUTPUT
-      
+
       - name: Deploy to Elastic Beanstalk
         uses: einaregilsson/beanstalk-deploy@v22
         with:
@@ -52,7 +50,7 @@ jobs:
           deployment_package: backend-deploy.zip
           wait_for_deployment: true
           wait_for_environment_recovery: 300
-      
+
       - name: Deployment complete
         run: |
           echo "✅ Backend deployed successfully to Elastic Beanstalk!"
