@@ -49,7 +49,11 @@ app.use(cors(corsOptions));
 app.use(requestLogger);
 
 // Rate limiting
-app.use(rateLimit({\n  windowMs: 15 * 60 * 1000,\n  max: 100,\n  message: 'Too many requests, please try again later.',\n}));
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: 'Too many requests, please try again later.',
+}));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
