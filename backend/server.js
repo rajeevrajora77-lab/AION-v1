@@ -124,7 +124,7 @@ app.get('/status', (req, res) => {
 
 // MongoDB connection with graceful failure handling
 // Ensure MONGODB_URI is set\nif (!process.env.MONGODB_URI) {\n  console.error('❌ MONGODB_URI environment variable is not set');\n  process.exit(1);\n}\n\nmongoose
-  .connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/aion', {
+  mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/aion', {
     serverSelectionTimeoutMS: 5000,
   })
   .then(() => {
