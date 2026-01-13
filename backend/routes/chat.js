@@ -1,20 +1,38 @@
 import express from 'express';
 import Chat from '../models/Chat.js';
 import { streamChatCompletion, createChatCompletion } from '../utils/openai.js';
+import mongoose from 'mongoose';
 
 const router = express.Router();
+
+// Helper function to validate MongoDB ObjectId
+function isValidObjectId(id) {
+  return mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === id;
+}
 
 // POST /api/chat - Stream AI response
 router.post('/', async (req, res) => {
   try {
     const { message, sessionId } = req.body;
     
-    if (!message || !message.trim()) {
+    // Validate message
+    if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ error: 'Message cannot be empty' });
     }
     
-    // Create/get session
-    let chat = sessionId ? await Chat.findById(sessionId) : null;
+    // Create/get session with proper validation
+    let chat = null;
+    if (sessionId) {
+      // Validate sessionId is a proper MongoDB ObjectId
+      if (!isValidObjectId(sessionId)) {
+        console.warn(`Invalid sessionId format: ${sessionId}`);
+        // Create new session instead of failing
+        chat = new Chat({ messages: [] });
+      } else {
+        chat = await Chat.findById(sessionId);
+      }
+    }
+    
     if (!chat) {
       chat = new Chat({ messages: [] });
     }
@@ -33,6 +51,7 @@ router.post('/', async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Transfer-Encoding', 'chunked');
     res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx/CDN buffering
+    
     // Stream response from OpenAI
     let fullResponse = '';
     await streamChatCompletion(
@@ -55,8 +74,49 @@ router.post('/', async (req, res) => {
     res.end();
     
   } catch (error) {
-    console.error('Chat streaming error:', error);
-    res.status(500).json({ error: 'Failed to process chat request' });
+    // Safe, structured logging
+    console.error('Chat streaming error:', {
+      name: error?.name,
+      message: error?.message,
+      code: error?.code,
+      type: error?.type,
+      status: error?.status,
+    });
+
+    // Avoid writing to SSE after headers already sent
+    if (res.headersSent) {
+      try {
+        res.write(`data: ${JSON.stringify({ error: 'stream_error' })}\n\n`);
+        res.end();
+      } catch (_) {
+        // ignore
+      }
+      return;
+    }
+
+    // Classify OpenAI unavailability
+    if (error.message === 'OpenAI unavailable') {
+      return res.status(503).json({
+        error: 'AI service temporarily unavailable',
+      });
+    }
+
+    // OpenAI API error formats
+    if (error?.response?.status) {
+      const status = error.response.status;
+      const data = error.response.data || {};
+      return res.status(status).json({
+        error: 'AI provider error',
+        providerStatus: status,
+        providerCode: data.error?.code || null,
+        providerType: data.error?.type || null,
+      });
+    }
+
+    // Fallback internal error
+    res.status(500).json({
+      error: 'Failed to process chat request',
+    });
   }
 });
 
@@ -67,6 +127,10 @@ router.get('/history', async (req, res) => {
     
     if (!sessionId) {
       return res.status(400).json({ error: 'Session ID required' });
+    }
+    
+    if (!isValidObjectId(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID format' });
     }
     
     const chat = await Chat.findById(sessionId);
@@ -118,7 +182,11 @@ router.post('/complete', async (req, res) => {
       return res.status(400).json({ error: 'Message cannot be empty' });
     }
     
-    let chat = sessionId ? await Chat.findById(sessionId) : null;
+    let chat = null;
+    if (sessionId && isValidObjectId(sessionId)) {
+      chat = await Chat.findById(sessionId);
+    }
+    
     if (!chat) {
       chat = new Chat({ messages: [] });
     }
@@ -155,6 +223,11 @@ router.post('/complete', async (req, res) => {
 router.delete('/history/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ error: 'Invalid session ID format' });
+    }
+    
     const result = await Chat.findByIdAndDelete(id);
     
     if (!result) {
@@ -175,6 +248,10 @@ router.post('/clear', async (req, res) => {
     
     if (!sessionId) {
       return res.status(400).json({ error: 'Session ID required' });
+    }
+    
+    if (!isValidObjectId(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID format' });
     }
     
     const chat = await Chat.findByIdAndUpdate(
