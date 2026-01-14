@@ -8,6 +8,7 @@ function Chat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const lastAssistantIndexRef = useRef(-1);
@@ -34,7 +35,7 @@ function Chat() {
     // Add user message to chat
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setIsStreaming(true);
-    lastAssistantIndexRef.current = messages.length; // Index where assistant message will be
+    lastAssistantIndexRef.current = messages.length;
 
     // Create abort controller for this request
     abortControllerRef.current = new AbortController();
@@ -72,6 +73,7 @@ function Chat() {
 
         for (const line of lines) {
           if (!line.trim()) continue;
+
           if (line.startsWith('data: ')) {
             try {
               const jsonStr = line.slice(6);
@@ -108,7 +110,6 @@ function Chat() {
     } catch (err) {
       if (err.name === 'AbortError') {
         console.log('Stream cancelled by user');
-        // Add cancellation note to UI
         setMessages(prev => {
           const updated = [...prev];
           if (updated[lastAssistantIndexRef.current]) {
@@ -133,176 +134,131 @@ function Chat() {
     }
   };
 
+  const handleNewChat = () => {
+    setMessages([]);
+    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    setSessionId(id);
+    setError(null);
+  };
+
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h2>AION Chat</h2>
-        <p style={styles.sessionId}>Session: {sessionId?.slice(0, 12)}...</p>
-      </div>
-
-      {/* Messages Area */}
-      <div style={styles.messagesContainer}>
-        {messages.length === 0 ? (
-          <p style={styles.placeholder}>Start a conversation...</p>
-        ) : (
-          messages.map((msg, idx) => (
-            <div key={idx} style={{
-              ...styles.message,
-              ...( msg.role === 'user' ? styles.userMessage : styles.assistantMessage)
-            }}>
-              <strong>{msg.role === 'user' ? 'You' : 'Assistant'}:</strong>
-              <p>{msg.content}</p>
-            </div>
-          ))
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Error Display */}
-      {error && (
-        <div style={styles.error}>
-          Error: {error}
-        </div>
-      )}
-
-      {/* Input Area */}
-      <form onSubmit={handleSendMessage} style={styles.inputForm}>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
-              e.preventDefault();
-              handleSendMessage(e);
-            }
-          }}
-          placeholder="Type your message... (Shift+Enter for new line)"
-          disabled={isStreaming}
-          style={styles.textarea}
-        />
-        <div style={styles.buttonGroup}>
-          <button
-            type="submit"
-            disabled={isStreaming || !input.trim()}
-            style={{
-              ...styles.button,
-              ...( isStreaming || !input.trim() ? styles.buttonDisabled : styles.buttonSend)
-            }}
+    <div className="bg-[#0f0f0f] text-white h-screen flex overflow-hidden">
+      {/* Sidebar */}
+      <aside 
+        className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-[#171717] border-r border-[#262626] flex flex-col transition-all duration-300`}
+      >
+        <div className="p-4 flex items-center justify-between">
+          {!sidebarCollapsed && <div className="text-xl font-bold tracking-wide">AION</div>}
+          <button 
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="text-gray-400 hover:text-white text-sm"
           >
-            Send
+            ☰
           </button>
-          {isStreaming && (
-            <button
-              type="button"
-              onClick={handleStopStream}
-              style={{...styles.button, ...styles.buttonStop}}
-            >
-              Stop
-            </button>
-          )}
         </div>
-      </form>
+
+        {!sidebarCollapsed && (
+          <>
+            <button 
+              onClick={handleNewChat}
+              className="mx-4 mb-4 py-2 rounded-xl bg-[#262626] hover:bg-[#303030] text-sm"
+            >
+              + New Chat
+            </button>
+
+            <div className="flex-1 overflow-y-auto px-2 space-y-2">
+              <div className="p-2 rounded-lg bg-[#1f1f1f] text-sm truncate">
+                Current Session
+              </div>
+              <div className="p-2 rounded-lg hover:bg-[#1f1f1f] text-sm truncate">
+                Previous Chat 1
+              </div>
+              <div className="p-2 rounded-lg hover:bg-[#1f1f1f] text-sm truncate">
+                Previous Chat 2
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-[#262626] text-xs text-gray-400">
+              Free Plan • AION v1
+            </div>
+          </>
+        )}
+      </aside>
+
+      {/* Main Chat Area */}
+      <main className="flex-1 flex flex-col">
+        {/* Header */}
+        <header className="h-14 border-b border-[#262626] flex items-center px-6 justify-between">
+          <div className="font-medium">AION Assistant</div>
+          <div className="text-xs text-gray-500">
+            {sessionId?.slice(0, 15)}...
+          </div>
+        </header>
+
+        {/* Messages */}
+        <section className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+          {messages.length === 0 ? (
+            <p className="text-center text-gray-500 mt-40">Start a conversation...</p>
+          ) : (
+            messages.map((msg, idx) => (
+              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`${
+                  msg.role === 'user' 
+                    ? 'bg-[#262626] px-4 py-2 rounded-2xl max-w-xl text-sm' 
+                    : 'bg-[#1a1a1a] border border-[#262626] px-4 py-3 rounded-2xl max-w-xl text-sm leading-relaxed'
+                }`}>
+                  {msg.content}
+                </div>
+              </div>
+            ))
+          )}
+          <div ref={messagesEndRef} />
+        </section>
+
+        {/* Error Display */}
+        {error && (
+          <div className="px-6 py-3 bg-red-900/20 border-t border-red-900/50 text-red-400 text-sm">
+            Error: {error}
+          </div>
+        )}
+
+        {/* Input box */}
+        <footer className="border-t border-[#262626] p-4">
+          <form 
+            onSubmit={handleSendMessage}
+            className="max-w-4xl mx-auto flex items-center gap-3 bg-[#171717] border border-[#262626] rounded-2xl px-4 py-3"
+          >
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Message AION..."
+              disabled={isStreaming}
+              className="flex-1 bg-transparent outline-none text-sm placeholder-gray-500"
+            />
+            {isStreaming ? (
+              <button
+                type="button"
+                onClick={handleStopStream}
+                className="bg-red-600 text-white px-4 py-1.5 rounded-xl text-sm font-medium hover:bg-red-700"
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim()}
+                className="bg-white text-black px-4 py-1.5 rounded-xl text-sm font-medium hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Send
+              </button>
+            )}
+          </form>
+          <p className="text-xs text-center text-gray-500 mt-2">AION can make mistakes. Check important info.</p>
+        </footer>
+      </main>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100vh',
-    backgroundColor: '#f5f5f5',
-    fontFamily: 'Arial, sans-serif',
-  },
-  header: {
-    padding: '20px',
-    backgroundColor: '#007bff',
-    color: 'white',
-    textAlign: 'center',
-    borderBottom: '1px solid #0056b3',
-  },
-  sessionId: {
-    fontSize: '12px',
-    opacity: 0.8,
-    margin: '5px 0 0 0',
-  },
-  messagesContainer: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '20px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-  },
-  placeholder: {
-    textAlign: 'center',
-    color: '#999',
-    marginTop: '40px',
-  },
-  message: {
-    padding: '10px 15px',
-    borderRadius: '5px',
-    maxWidth: '80%',
-    wordWrap: 'break-word',
-  },
-  userMessage: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#007bff',
-    color: 'white',
-  },
-  assistantMessage: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#e9ecef',
-    color: 'black',
-  },
-  error: {
-    padding: '10px 20px',
-    backgroundColor: '#f8d7da',
-    color: '#721c24',
-    borderTop: '1px solid #f5c6cb',
-    fontSize: '14px',
-  },
-  inputForm: {
-    padding: '20px',
-    backgroundColor: 'white',
-    borderTop: '1px solid #ddd',
-  },
-  textarea: {
-    width: '100%',
-    minHeight: '80px',
-    padding: '10px',
-    border: '1px solid #ddd',
-    borderRadius: '5px',
-    fontFamily: 'Arial, sans-serif',
-    fontSize: '14px',
-    boxSizing: 'border-box',
-  },
-  buttonGroup: {
-    display: 'flex',
-    gap: '10px',
-    marginTop: '10px',
-  },
-  button: {
-    padding: '10px 20px',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    fontSize: '14px',
-  },
-  buttonSend: {
-    backgroundColor: '#28a745',
-    color: 'white',
-  },
-  buttonStop: {
-    backgroundColor: '#dc3545',
-    color: 'white',
-  },
-  buttonDisabled: {
-    backgroundColor: '#ccc',
-    color: '#666',
-    cursor: 'not-allowed',
-  },
-};
 
 export default Chat;
