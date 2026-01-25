@@ -15,6 +15,22 @@ import { requestLogger } from './middleware/requestLogger.js';
 
 dotenv.config();
 
+// Environment variable validation
+const requiredEnvVars = [
+  'OPENAI_API_KEY',
+  'MONGODB_URI',
+  'FRONTEND_URL'
+];
+
+const missingEnvVars = requiredEnvVars.filter(key => !process.env[key]);
+
+if (missingEnvVars.length > 0) {
+  console.error('❌ Missing required environment variables:', missingEnvVars.join(', '));
+  process.exit(1);
+}
+
+console.log('✅ All required environment variables are set');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
