@@ -1,0 +1,71 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        project: [backend, frontend]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ${{ matrix.project }}
+        run: npm ci
+      
+      - name: Run npm audit (production)
+        working-directory: ${{ matrix.project }}
+        run: npm audit --production --audit-level=high
+        continue-on-error: true
+      
+      - name: Check for vulnerabilities
+        working-directory: ${{ matrix.project }}
+        run: |
+          echo "Security audit completed for ${{ matrix.project }}"
+          npm audit --production || echo "Found vulnerabilities in ${{ matrix.project }}"
+  
+  python-security:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install pip-audit
+        run: pip install pip-audit
+      
+      - name: Run pip-audit
+        working-directory: backend/python_backend
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+            pip-audit
+          else
+            echo "No requirements.txt found"
+          fi
+        continue-on-error: true
