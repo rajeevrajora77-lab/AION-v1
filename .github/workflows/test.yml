@@ -21,8 +21,6 @@ jobs:
       uses: actions/setup-node@v3
       with:
         node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-        cache-dependency-path: backend/package-lock.json
     
     - name: Install backend dependencies
       working-directory: ./backend
@@ -31,6 +29,10 @@ jobs:
     - name: Run backend tests
       working-directory: ./backend
       run: npm test
+            env:
+                    OPENAI_API_KEY: test-key-ci
+                            MONGODB_URI: mongodb://localhost:27017/test
+                                    FRONTEND_URL: http://localhost:3000
     
     - name: Upload coverage reports
       uses: codecov/codecov-action@v3
