@@ -22,6 +22,22 @@ router.post('/', async (req, res) => {
     // Validate message
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ error: 'Message cannot be empty' });
+      
+    // Enhanced input validation
+    const trimmed = message.trim();
+    const MAX_MESSAGE_LENGTH = 2000;
+
+    // Validate not empty after trim
+    if (!trimmed) {
+      return res.status(400).json({ error: 'Message cannot be empty' });
+    }
+
+    // Validate length
+    if (trimmed.length > MAX_MESSAGE_LENGTH) {
+      return res.status(400).json({ 
+        error: `Message is too long (max ${MAX_MESSAGE_LENGTH} characters)` 
+      });
+    }
     }
     
     // Create/get session with proper validation
