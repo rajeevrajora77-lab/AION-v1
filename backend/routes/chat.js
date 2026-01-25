@@ -13,6 +13,10 @@ function isValidObjectId(id) {
 // POST /api/chat - Stream AI response
 router.post('/', async (req, res) => {
   try {
+        console.log('\n📥 Incoming Chat Request');
+    console.log('  - Timestamp:', new Date().toISOString());
+    console.log('  - Message length:', message?.length || 0);
+    console.log('  - Session ID:', sessionId || 'new session');
     const { message, sessionId } = req.body;
     
     // Validate message
@@ -75,13 +79,18 @@ router.post('/', async (req, res) => {
     
   } catch (error) {
     // Safe, structured logging
-    console.error('Chat streaming error:', {
-      name: error?.name,
-      message: error?.message,
-      code: error?.code,
-      type: error?.type,
-      status: error?.status,
-    });
+        console.log('\n=======================');
+    console.log('🚨 CHAT API ERROR');
+    console.log('=======================');
+    console.log('📍 Route: POST /api/chat');
+    console.log('📅 Timestamp:', new Date().toISOString());
+    console.log('\n🔍 Error Details:');
+    console.log('  - Message:', error?.message || 'Unknown error');
+    console.log('  - Name:', error?.name || 'N/A');
+    console.log('  - Code:', error?.code || 'N/A');
+    console.log('  - Status:', error?.status || 'N/A');
+    console.log('  - Type:', error?.type || 'N/A');
+    console.log('=======================\n');
 
     // Avoid writing to SSE after headers already sent
     if (res.headersSent) {
