@@ -8,6 +8,7 @@ import chatRoutes from './routes/chat.js';
 import searchRoutes from './routes/search.js';
 import voiceRoutes from './routes/voice.js';
 import healthRoutes from './routes/health.js';
+import authRoutes from './routes/auth.js';
 // import { errorHandler } from './middleware/errorHandler.js';
 // import rateLimiter from './middleware/rateLimiter.js';
 import rateLimit from 'express-rate-limit';
@@ -180,6 +181,7 @@ app.use('/__aion_shadow/api', createProxyMiddleware({
 app.use('/__aion_shadow/ui', express.static('frontend/dist'));
 
   app.use('/api/chat', chatRoutes);
+    app.use('/api/auth', authRoutes);
   console.log('✅ Chat routes loaded');
 } catch (error) {
   console.error('❌ Failed to load chat routes:', error.message);
