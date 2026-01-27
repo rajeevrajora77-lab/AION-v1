@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import Login from './pages/Login.jsx';
-import Chat from './components/Chat';
+import Dashboard from './pages/Dashboard.jsx';
 
 function App() {
   const { isAuthenticated } = useAuthStore();
@@ -14,7 +14,7 @@ function App() {
       />
       <Route 
         path="/dashboard" 
-        element={isAuthenticated ? <Chat /> : <Navigate to="/login" />} 
+        element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />} 
       />
       <Route 
         path="/" 
