@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import Login from './pages/Login.jsx';
+import Signup from './pages/Signup.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 
 function App() {
@@ -11,6 +12,10 @@ function App() {
       <Route 
         path="/login" 
         element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />} 
+      />
+            <Route 
+        path="/signup" 
+        element={!isAuthenticated ? <Signup /> : <Navigate to="/dashboard" />} 
       />
       <Route 
         path="/dashboard" 
