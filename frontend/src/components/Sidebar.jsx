@@ -1,41 +1,52 @@
-import React from 'react';
-import styles from '../styles/sidebar.module.css';
+import { useAuthStore } from '../store/authStore';
 
-const Sidebar = ({ conversations, onSelectConversation, onNewConversation }) => {
+function Sidebar({ activeView, setActiveView }) {
+  const { logout } = useAuthStore();
+
+  const menuItems = [
+    { id: 'chat', label: 'Chat', icon: '💬' },
+    { id: 'search', label: 'Search', icon: '🔍' },
+    { id: 'voice', label: 'Voice', icon: '🎤' },
+  ];
+
   return (
-    <aside className={styles.sidebar}>
-      <div className={styles.sidebarHeader}>
-        <h2>AION</h2>
+    <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
+      {/* Header */}
+      <div className="p-6 border-b border-gray-200">
+        <h1 className="text-2xl font-bold text-gray-900">AION v1</h1>
+        <p className="text-sm text-gray-500 mt-1">AI Operating Intelligence</p>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 p-4 space-y-2">
+        {menuItems.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => setActiveView(item.id)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+              activeView === item.id
+                ? 'bg-blue-50 text-blue-600 font-medium'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <span className="text-2xl">{item.icon}</span>
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {/* Footer */}
+      <div className="p-4 border-t border-gray-200">
         <button
-          className={styles.newChatBtn}
-          onClick={onNewConversation}
-          title="Start a new conversation"
+          onClick={() => logout()}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
         >
-          + New Chat
+          <span className="text-2xl">🚪</span>
+          <span>Logout</span>
         </button>
       </div>
-      <nav className={styles.conversationList}>
-        {conversations.length === 0 ? (
-          <p className={styles.emptyState}>No conversations yet</p>
-        ) : (
-          conversations.map((conv) => (
-            <div
-              key={conv.id}
-              className={styles.conversationItem}
-              onClick={() => onSelectConversation(conv.id)}
-              role="button"
-              tabIndex={0}
-            >
-              <p className={styles.conversationTitle}>{conv.title || 'Untitled'}</p>
-              <span className={styles.timestamp}>
-                {new Date(conv.createdAt).toLocaleDateString()}
-              </span>
-            </div>
-          ))
-        )}
-      </nav>
-    </aside>
+    </div>
   );
-};
+}
 
 export default Sidebar;
