@@ -20,7 +20,6 @@ dotenv.config();
 // Environment variable validation
 const requiredEnvVars = [
   'OPENAI_API_KEY',
-  'MONGODB_URI',
   'FRONTEND_URL'
 ];
 
