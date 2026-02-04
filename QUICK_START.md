@@ -30,10 +30,21 @@
 - `frontend/src/components/` (Chat, Search, Voice, Navigation)
 - `frontend/src/styles/App.css`
 
+## Local run (backend)
+
+```bash
+cd backend
+npm install
+npm run build
+npm start   # runs node dist/app.js
+```
+
 ## Deploy with:
 ```bash
-# Backend: Railway or Render
-# Frontend: Vercel or Netlify
+# Backend: Elastic Beanstalk / Railway / Render
+# Use: npm run build && npm start (node dist/app.js)
+
+# Frontend: Vercel / Netlify / S3+CloudFront
 ```
 
 **Status**: Backend routes and middleware are now implemented under `backend/src/api/*`; Phase 4 will complete the full migration into `backend/src/*` only.
