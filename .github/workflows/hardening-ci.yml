@@ -21,8 +21,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  backend-tests:
-    name: Backend tests + coverage
+  backend-build-test:
+    name: Backend typecheck/build/test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +34,13 @@ jobs:
       - name: Install deps
         working-directory: backend
         run: npm install
-      - name: Run tests (with coverage)
+      - name: Typecheck
+        working-directory: backend
+        run: npm run typecheck
+      - name: Build
+        working-directory: backend
+        run: npm run build
+      - name: Tests (with coverage)
         working-directory: backend
         run: npm test -- --coverage
 
