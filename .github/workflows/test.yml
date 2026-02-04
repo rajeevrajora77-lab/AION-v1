@@ -21,8 +21,7 @@ jobs:
       uses: actions/setup-node@v3
       with:
         node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-        cache-dependency-path: './backend/package-lock.json'
+        # Cache disabled until package-lock.json is committed
     
     - name: Check for package-lock.json
       id: check-lock
