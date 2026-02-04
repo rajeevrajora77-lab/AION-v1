@@ -10,7 +10,6 @@ import { loadEnvOrFail, getRuntimeConfig } from './config/env.js';
 import { buildCorsOptions } from './config/cors.js';
 import { connectMongoIfConfigured, mongoReadyState } from './infra/db/mongo.js';
 
-// Phase 3 migration: wrap legacy modules behind src/api/* so app bootstrap is clean.
 import chatRoutes from './api/routes/chat.js';
 import searchRoutes from './api/routes/search.js';
 import voiceRoutes from './api/routes/voice.js';
@@ -25,7 +24,6 @@ export function createApp(): Express {
 
   const app = express();
 
-  // Security headers
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -40,13 +38,9 @@ export function createApp(): Express {
     })
   );
 
-  // CORS
   app.use(cors(buildCorsOptions(cfg)));
-
-  // Request logging
   app.use(requestLogger);
 
-  // Rate limiting
   app.use(
     rateLimit({
       windowMs: cfg.rateLimit.windowMs,
@@ -68,11 +62,9 @@ export function createApp(): Express {
     })
   );
 
-  // Body parsing
   app.use(express.json({ limit: cfg.http.bodyLimit }));
   app.use(express.urlencoded({ extended: true, limit: cfg.http.bodyLimit }));
 
-  // Shadow routing (kept for now; Phase 4 will remove or re-implement properly)
   if (cfg.shadow.enabled) {
     app.use(
       '/__aion_shadow/api',
@@ -88,16 +80,10 @@ export function createApp(): Express {
             : `Shadow API error: ${(err as Error).message}`;
           res.status(503).json({ error: 'Shadow API unavailable', message: errorMessage });
         },
-        onProxyReq: (proxyReq, req) => {
-          // Avoid leaking sensitive data; minimal audit context only.
-          // eslint-disable-next-line no-console
-          console.log(`[Shadow Proxy] ${req.method} ${req.url} user=${(req as any).user?.email || 'unknown'}`);
-        },
       })
     );
   }
 
-  // Root + health
   app.get('/', (req, res) => {
     res.json({
       name: 'AION v1 API',
@@ -149,14 +135,12 @@ export function createApp(): Express {
     });
   });
 
-  // Routes
   app.use('/api/chat', chatRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/search', searchRoutes);
   app.use('/api/voice', voiceRoutes);
   app.use(healthRoutes);
 
-  // 404
   app.use((req, res) => {
     res.status(404).json({
       error: 'Route not found',
@@ -166,7 +150,6 @@ export function createApp(): Express {
     });
   });
 
-  // Global error handler (Phase 4 will replace with typed errors + centralized handler module)
   app.use((err: any, req: any, res: any, next: any) => {
     // eslint-disable-next-line no-console
     console.error('Global error handler:', err);
