@@ -4,92 +4,91 @@ A production-ready AI web application featuring real-time chat, intelligent sear
 
 ## Features
 
-### Core Capabilities
-- **AI Chat System**: ChatGPT-like conversational interface with streaming responses
-- **Intelligent Search Engine**: Custom search powered by BingSerpAPI with clean UI
-- **Voice Assistant**: Speech-to-text and text-to-speech interactions
-- **Real-time Streaming**: Live AI response generation
-- **Chat History**: MongoDB-powered conversation persistence
-- **Rate Limiting**: Production-grade API protection
-- **Error Handling**: Comprehensive error management
+- AI chat with streaming responses
+- Intelligent search (Bing / SerpAPI)
+- Voice input/output (speech-to-text, text-to-speech)
+- MongoDB-backed chat history
+- Rate limiting, secure error handling, and environment-based configuration
 
-## Tech Stack
+## Tech stack
 
-### Frontend
-- React 18
-- Vite
-- Axios
-- Modern CSS3
-
-### Backend
-- Node.js
-- Express.js
-- MongoDB
-- OpenAI-compatible API
-- dotenv
-
-### AI APIs
-- OpenAI API (GPT-4/GPT-3.5)
-- Bing Search API / SerpAPI
-- Web Speech API
+- Frontend: React 18 + Vite
+- Backend: Node.js + Express (TypeScript build output)
+- Database: MongoDB
+- AI: OpenAI-compatible API
 
 ## Prerequisites
 
-- Node.js 18 and npm
+- Node.js 18+
 - MongoDB (local or Atlas)
 - OpenAI API key
-- Bing Search API key or SerpAPI key (optional)
+- Optional: Bing Search API key or SerpAPI key
 
-## Setup Instructions
+## Setup
 
-### 1. Clone Repository
+### 1) Clone
 
 ```bash
 git clone https://github.com/rajeevrajora77-lab/AION-v1.git
-cd aion
+cd AION-v1
 ```
 
-### 2. Environment Variables
+### 2) Backend env
 
-Create `.env` file in the backend directory:
+Create `backend/.env`:
 
 ```env
-# Server Configuration
+# Server
 PORT=5000
-NODE_ENV=production
+NODE_ENV=development
 
-# MongoDB Connection
+# MongoDB
 MONGODB_URI=mongodb://localhost:27017/aion
 
-# OpenAI API
-OPENAI_API_KEY=your-openai-api-key-here
+# AI
+OPENAI_API_KEY=your-openai-api-key
 OPENAI_MODEL=gpt-4
 OPENAI_MAX_TOKENS=2000
 
-# Search API (choose one)
-BING_API_KEY=your-bing-api-key-here
-# OR
-SERPAPI_KEY=your-serpapi-key-here
+# Auth (required)
+JWT_SECRET=your-long-random-secret
 
-# CORS Configuration
+# Search (choose one)
+BING_API_KEY=your-bing-api-key
+# OR
+SERPAPI_KEY=your-serpapi-key
+
+# CORS
 FRONTEND_URL=http://localhost:5173
 
-# Rate Limiting
+# Rate limiting
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX_REQUESTS=100
 ```
 
-### 3. Backend Setup
+Generate a strong JWT secret:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+```
+
+### 3) Run backend
 
 ```bash
 cd backend
 npm install
-npm start
+
+# Dev (TypeScript)
+npm run dev
+
+# Or production-like:
+# npm run build
+# npm start
 ```
 
-Server runs on `http://localhost:5000`
+The backend build/start scripts compile TypeScript and run `dist/app.js`. 
 
-### 4. Frontend Setup
+### 4) Run frontend
 
 ```bash
 cd frontend
@@ -97,112 +96,18 @@ npm install
 npm run dev
 ```
 
-Frontend runs on `http://localhost:5173`
+Frontend runs on `http://localhost:5173`.
 
-## API Endpoints
+## API endpoints (high level)
 
-### Chat
-- `POST /api/chat` - Stream AI responses
-- `GET /api/chat/history` - Retrieve chat history
-- `DELETE /api/chat/history/:id` - Delete conversation
-- `POST /api/chat/complete` - Non-streaming chat completion
-- `POST /api/chat/clear` - Clear all messages in a session
-- `GET /api/chat/sessions` - List all chat sessions
+- Chat: `/api/chat`, `/api/chat/history`, `/api/chat/sessions`
+- Search: `/api/search`, `/api/search/suggestions`
+- Voice: `/api/voice/*`
 
-### Search
-- `POST /api/search` - Execute web search (returns title, snippet, source URL)
-- `GET /api/search/suggestions` - Get search suggestions
+## Deployment notes
 
-### Voice
-- `POST /api/voice/process` - Process voice transcription
-- `POST /api/voice/synthesize` - Text-to-speech endpoint
-- `GET /api/voice/config` - Get voice configuration
-
-## Project Structure
-
-```
-aion/
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Chat.jsx
-│   │   │   ├── Search.jsx
-│   │   │   ├── Voice.jsx
-│   │   │   └── Navigation.jsx
-│   │   ├── services/
-│   │   │   └── api.js
-│   │   ├── styles/
-│   │   │   └── App.css
-│   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   └── package.json
-│   ├── vite.config.js
-│   └── index.html
-├── backend/
-│   ├── routes/
-│   │   ├── chat.js
-│   │   ├── search.js
-│   │   └── voice.js
-│   ├── models/
-│   │   └── Chat.js
-│   ├── middleware/
-│   │   ├── rateLimiter.js
-│   │   └── errorHandler.js
-│   ├── utils/
-│   │   └── openai.js
-│   ├── server.js
-│   ├── package.json
-│   └── .env.example
-├── README.md
-└── LICENSE
-```
-
-## Security Features
-
-- Rate limiting (100 requests/15 minutes)
-- Environment variable protection
-- CORS configuration
-- Input validation
-- Error sanitization
-- Helmet.js for HTTP headers
-
-## Deployment
-
-### Backend Deployment (Railway/Render/Heroku)
-
-1. Set environment variables
-2. Deploy from GitHub
-3. Update MONGODB_URI to Atlas cluster
-
-### Frontend Deployment (Vercel/Netlify)
-
-1. Build: `npm run build`
-2. Deploy dist folder
-3. Update API_BASE_URL in production
-
-## Roadmap - AION v2
-
-- User authentication & authorization
-- Multi-model support (Anthropic, Gemini)
-- Advanced RAG with vector databases
-- File upload analysis
-- Collaborative chat rooms
-- Mobile application (React Native)
-- Plugin ecosystem
-- Custom fine-tuned models
-- Analytics dashboard
-- WebSocket real-time updates
-- Docker containerization
-- Kubernetes orchestration
-
-## Contributing
-
-Contributions welcome! Please read CONTRIBUTING.md
+For platforms that support a Procfile, the backend Procfile uses `npm run build && npm run start`. 
 
 ## License
 
-MIT License - See LICENSE file
-
----
-
-Built with ❤️ by the AION Team
+MIT (see `LICENSE`).
