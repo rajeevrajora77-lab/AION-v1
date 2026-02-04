@@ -41,7 +41,7 @@ railway up
 In Railway Dashboard:
 1. Go to your project
 2. Click "Variables"
-3. Add these:
+3. Add these (use placeholders; never commit secrets):
 
 ```bash
 PORT=5000
@@ -50,8 +50,8 @@ NODE_ENV=production
 # MongoDB
 MONGODB_URI=your-mongodb-atlas-uri
 
-# OpenAI API
-OPENAI_API_KEY=YOUR_OPENAI_API_KEY_HEREMcLN-l8sV4GYLf5fqnmb-bAoObOV6Ernt2jNQVur28Bcivpu1XNUO048Cu8ngahSkGgT3BlbkFJpchi0dx__H4grk1_7oZEwiaYcMEOe0pLmaVjFYs1ApTecPO7f1eVEJs9S0Fk5v8881UZYf7QMA
+# OpenAI
+OPENAI_API_KEY=your-openai-api-key
 OPENAI_MODEL=gpt-3.5-turbo
 OPENAI_MAX_TOKENS=2000
 
@@ -60,12 +60,17 @@ BING_API_KEY=your-bing-api-key
 # OR
 SERPAPI_KEY=your-serpapi-key
 
-# CORS
+# CORS / Frontend origin
 FRONTEND_URL=https://rajora.co.in
 
 # Rate Limiting
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX_REQUESTS=100
+
+# Optional: Shadow proxy (if using Python FastAPI alongside Node)
+# See backend/src/config/env.ts for the exact env var names expected
+# SHADOW_ENABLED=true
+# SHADOW_TARGET=http://localhost:8000
 ```
 
 ### Step 4: Get Your Backend URL
@@ -121,8 +126,8 @@ const API_BASE_URL =
 4. Settings:
    - **Name**: aion-backend
    - **Environment**: Node
-   - **Build Command**: `npm install`
-   - **Start Command**: `npm start`
+   - **Build Command**: `npm run build`
+   - **Start Command**: `npm start` (runs `node dist/app.js`)
    - **Plan**: Free
 
 ### Step 3: Add Environment Variables
@@ -140,23 +145,10 @@ https://aion-backend.onrender.com
 
 ## ⚙️ Fix Backend Configuration for Production
 
-### Update `backend/server.js`
+### CORS
+CORS is configured in the TypeScript backend and should be controlled via environment-driven config (see `backend/src/config/*` and `backend/src/app.ts`).
 
-Ensure CORS is configured:
-
-```javascript
-const cors = require('cors');
-
-const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'https://rajora.co.in',
-  credentials: true,
-  optionsSuccessStatus: 200
-};
-
-app.use(cors(corsOptions));
-```
-
-### Update `backend/.env`
+### Update `backend/.env` (local example)
 
 ```bash
 # Server
@@ -167,7 +159,7 @@ NODE_ENV=production
 MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/aion
 
 # OpenAI
-OPENAI_API_KEY=YOUR_OPENAI_API_KEY_HEREMcLN-l8sV4GYLf5fqnmb-bAoObOV6Ernt2jNQVur28Bcivpu1XNUO048Cu8ngahSkGgT3BlbkFJpchi0dx__H4grk1_7oZEwiaYcMEOe0pLmaVjFYs1ApTecPO7f1eVEJs9S0Fk5v8881UZYf7QMA
+OPENAI_API_KEY=your-openai-api-key
 
 # CORS
 FRONTEND_URL=https://rajora.co.in
@@ -177,14 +169,14 @@ FRONTEND_URL=https://rajora.co.in
 
 ## 🧪 Test Your Fix
 
-### 1. Test Backend Directly
+### 1. Test Backend Health
 ```bash
-curl https://your-backend-url.railway.app/api/health
+curl https://your-backend-url.railway.app/health
 ```
 
 Expected response:
 ```json
-{"status":"ok","timestamp":"..."}
+{"status":"OK","timestamp":"..."}
 ```
 
 ### 2. Test Chat Endpoint
@@ -229,7 +221,7 @@ Should work without "Error: Failed to fetch"
 ## 🐛 Troubleshooting
 
 ### Issue: "CORS Error"
-**Solution**: Check `FRONTEND_URL` in backend environment variables
+**Solution**: Check your backend CORS-related environment variables (and confirm the frontend origin matches exactly).
 
 ### Issue: "MongoDB Connection Error"
 **Solution**: 
@@ -255,9 +247,7 @@ railway login
 railway init
 railway up
 
-# 2. Add OpenAI key in Railway dashboard
-# OPENAI_API_KEY=your-key
-# FRONTEND_URL=https://rajora.co.in
+# 2. Add OPENAI_API_KEY + MONGODB_URI + FRONTEND_URL in Railway dashboard
 
 # 3. Get your Railway URL (e.g., https://xxx.railway.app)
 
@@ -282,13 +272,6 @@ bash scripts/deploy-frontend.sh
 3. ✅ Set up custom domain for backend (api.rajora.co.in)
 4. ✅ Enable logging and error tracking
 5. ✅ Set up automated backups for MongoDB
-
----
-
-## 📞 Need Help?
-
-**Railway Support**: https://railway.app/help
-**Render Support**: https://render.com/docs
 
 ---
 
