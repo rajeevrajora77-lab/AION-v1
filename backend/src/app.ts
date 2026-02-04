@@ -1,10 +1,13 @@
 import type { Express } from 'express';
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import mongoose from 'mongoose';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 import { loadEnvOrFail, getRuntimeConfig } from './config/env.js';
 import { buildCorsOptions } from './config/cors.js';
@@ -154,7 +157,9 @@ export function createApp(): Express {
     // eslint-disable-next-line no-console
     console.error('Global error handler:', err);
     if (cfg.isProduction) {
-      res.status(err?.status || 500).json({ error: 'Internal server error', message: 'An error occurred processing your request' });
+      res
+        .status(err?.status || 500)
+        .json({ error: 'Internal server error', message: 'An error occurred processing your request' });
     } else {
       res
         .status(err?.status || 500)
@@ -167,4 +172,39 @@ export function createApp(): Express {
 
 export async function initDependencies(): Promise<void> {
   await connectMongoIfConfigured();
+}
+
+export async function startServer(): Promise<void> {
+  const app = createApp();
+  const cfg = getRuntimeConfig();
+
+  await initDependencies();
+
+  const server = http.createServer(app);
+
+  server.listen(cfg.port, '0.0.0.0', () => {
+    // eslint-disable-next-line no-console
+    console.log(`AION backend listening on :${cfg.port} env=${cfg.isProduction ? 'production' : 'development'}`);
+  });
+
+  const shutdown = (signal: string) => {
+    // eslint-disable-next-line no-console
+    console.log(`${signal} received, shutting down`);
+    server.close(() => process.exit(0));
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+const _entry = process.argv[1] ? path.resolve(process.argv[1]) : null;
+const _self = path.resolve(fileURLToPath(import.meta.url));
+const _isMain = _entry !== null && _self === _entry;
+
+if (_isMain) {
+  startServer().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('Fatal: failed to start server', err);
+    process.exit(1);
+  });
 }
