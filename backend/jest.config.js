@@ -1,42 +1,26 @@
-module.exports = {
+export default {
   testEnvironment: 'node',
   coverageDirectory: 'coverage',
-  
-  // Allow both CommonJS and ES modules
-  transform: {},
-  
   collectCoverageFrom: [
-    '**/*.js',
-    '!**/node_modules/**',
-    '!**/coverage/**',
-    '!jest.config.js'
+    'routes/**/*.js',
+    'middleware/**/*.js',
+    'models/**/*.js',
+    'utils/**/*.js',
+    'server.js',
   ],
-  
-  // UPDATED: Look for .cjs test files (CommonJS)
-  testMatch: [
-    '**/__tests__/**/*.test.cjs',
-    '**/__tests__/**/*.test.js',
-    '**/*.test.cjs',
-    '**/*.test.js'
-  ],
-  
-  // Lower coverage threshold temporarily (increase later)
+  testMatch: ['**/__tests__/**/*.test.js'],
+  setupFilesAfterEnv: ['./__tests__/setup.js'],
+  transform: {},
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
+  testPathIgnorePatterns: ['/node_modules/', '/dist/'],
   coverageThreshold: {
     global: {
-      branches: 30,
-      functions: 30,
-      lines: 30,
-      statements: 30
-    }
+      branches: 50,
+      functions: 50,
+      lines: 50,
+      statements: 50,
+    },
   },
-  
-  verbose: true,
-  
-  // Support both .js and .cjs extensions
-  moduleFileExtensions: ['js', 'cjs', 'json'],
-  
-  // Don't transform node_modules
-  transformIgnorePatterns: [
-    'node_modules/'
-  ]
 };
