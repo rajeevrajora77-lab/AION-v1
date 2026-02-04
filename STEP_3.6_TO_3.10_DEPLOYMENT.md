@@ -110,7 +110,7 @@ ls -la /home/ec2-user/AION-v1/backend/.env
 
 ---
 
-## STEP 3.8 — Start Backend with PM2
+## STEP 3.8 — Start Backend with PM2 (TypeScript build output)
 
 ```bash
 # Navigate to backend directory
@@ -119,8 +119,11 @@ cd /home/ec2-user/AION-v1/backend
 # Install PM2 globally
 sudo npm install -g pm2
 
-# Start the backend application
-pm2 start server.js --name aion-backend
+# Build TypeScript → dist/
+npm run build
+
+# Start the backend application (compiled output)
+pm2 start dist/app.js --name aion-backend
 
 # Save PM2 configuration for auto-restart
 pm2 save
@@ -223,7 +226,7 @@ curl -X POST https://api.rajora.co.in/api/voice/process \\
   -d '{"transcript": "Hello world", "sessionId": "test"}'
 ```
 
-### **Troubleshooting API**:
+### Troubleshooting API
 
 | Issue | Solution |
 |-------|----------|
@@ -250,6 +253,7 @@ curl -X POST https://api.rajora.co.in/api/voice/process \\
 - [ ] OpenAI key is valid
 
 ✅ **STEP 3.8 Complete?**
+- [ ] Build succeeded (`dist/` exists)
 - [ ] PM2 shows aion-backend as online
 - [ ] `curl http://localhost:5000/health` returns OK
 - [ ] PM2 startup configured
@@ -295,11 +299,14 @@ ssh -i aion-backend-key.pem ec2-user@13.127.135.100
 # Navigate to backend
 cd ~/AION-v1/backend
 
+# Ensure dist exists (safe to re-run)
+npm run build
+
 # Restart PM2 app
 pm2 restart aion-backend
 
 # Or start if it was stopped
-pm2 start server.js --name aion-backend
+pm2 start dist/app.js --name aion-backend
 
 # Verify it's running
 pm2 list
