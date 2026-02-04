@@ -46,20 +46,12 @@ You want to add:
 
 ### Step 1: Add Python Backend to Current EB
 
-**File**: `backend/server.js` (UPDATE)
+**File**: `backend/src/app.ts` (UPDATE)
 
-```javascript
-// Add proxy to Python backend
-import { createProxyMiddleware } from 'http-proxy-middleware';
-
+```ts
 // Shadow API endpoint - forwards to Python backend
-app.use('/__aion_shadow/api', createProxyMiddleware({
-  target: 'http://localhost:8000', // Python FastAPI
-  changeOrigin: true,
-  pathRewrite: {
-    '^/__aion_shadow/api': '/api/v1'
-  }
-}));
+// (Already supported in app.ts when cfg.shadow.enabled is true)
+// Configure shadow target via env (see backend/src/config/env.ts)
 ```
 
 ### Step 2: Add Python FastAPI Backend
@@ -99,7 +91,7 @@ async def health():
 **File**: `backend/Procfile` (UPDATE)
 
 ```
-web: node server.js
+web: npm run build && npm run start
 python: cd python_backend && uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -180,11 +172,10 @@ eb deploy --version <previous-version-label>
 
 ### Phase 1: Add Shadow Backend (This Week)
 - [ ] Add `http-proxy-middleware` to package.json
-- [ ] Update `server.js` with shadow proxy  
+- [ ] Ensure shadow proxy is enabled/configured (env-driven)
 - [ ] Create `python_backend/main.py`
 - [ ] Update `Procfile` to run both Node + Python
-- [ ] Update `package.json` dependencies
-- [ ] Test locally: `npm start` (should run both)
+- [ ] Test locally: `npm run build && npm start`
 - [ ] Deploy to EB
 - [ ] Test `/__aion_shadow/api/v1/chat`
 
