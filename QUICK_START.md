@@ -1,37 +1,34 @@
 # AION v1 - Quick Start Implementation Guide
 
 ## Current Progress
-- ✅ backend/server.js - Express server with CORS, rate limiting, MongoDB
-- ✅ backend/models/Chat.js - Mongoose schema with TTL support
-- ✅ backend/middleware/errorHandler.js - Global error handling
-- 🔄 Remaining backend files (routes, utils, rateLimiter)
-- 🔄 All frontend files needed
+- ✅ `backend/src/app.ts` - Express app bootstrap (CORS, Helmet, rate limiting, routes)
+- ✅ `backend/src/api/routes/*` - Route implementations (auth/chat/search/voice/health)
+- ✅ `backend/src/api/middleware/*` - Middleware implementations (auth, request logger, rate limiter, error handler)
+- ✅ `backend/models/Chat.js` - Mongoose schema with TTL support
+- 🔄 Remaining backend work: move legacy `backend/utils/*` and `backend/models/*` into `backend/src/*` (Phase 4)
+- 🔄 Frontend files needed
 
 ## Next Steps to Complete Implementation
 
-### 1. Create remaining backend middleware file: backend/middleware/rateLimiter.js
+### 1. Backend work (Phase 4+)
+- Migrate utilities from `backend/utils/*` into `backend/src/*` (e.g., `src/services/*` or `src/infra/*`).
+- Migrate models from `backend/models/*` into `backend/src/*` (e.g., `src/domain/*` or `src/infra/db/*`).
+- Replace the inline global error handler in `backend/src/app.ts` with `backend/src/api/middleware/errorHandler.ts`.
 
-### 2. Create backend utilities: backend/utils/openai.js
+### 2. Frontend restructure
+- Move backend/frontend/ → root-level `frontend/`
+- Create `frontend/src/` directory structure
 
-### 3. Create backend routes:
-- backend/routes/chat.js (stream + complete endpoints)
-- backend/routes/search.js (Bing/SerpAPI integration)
-- backend/routes/voice.js (transcription processing)
-
-### 4. Restructure frontend:
-- Move backend/frontend/ → root-level frontend/
-- Create frontend/src/ directory structure
-
-### 5. Create frontend files:
-- frontend/index.html
-- frontend/vite.config.js
-- frontend/package.json
-- frontend/.env.example
-- frontend/src/main.jsx
-- frontend/src/App.jsx
-- frontend/src/services/api.js
-- frontend/src/components/ (Chat, Search, Voice, Navigation)
-- frontend/src/styles/App.css
+### 3. Create frontend files
+- `frontend/index.html`
+- `frontend/vite.config.js`
+- `frontend/package.json`
+- `frontend/.env.example`
+- `frontend/src/main.jsx`
+- `frontend/src/App.jsx`
+- `frontend/src/services/api.js`
+- `frontend/src/components/` (Chat, Search, Voice, Navigation)
+- `frontend/src/styles/App.css`
 
 ## Deploy with:
 ```bash
@@ -39,4 +36,4 @@
 # Frontend: Vercel or Netlify
 ```
 
-**Status**: Core backend infrastructure complete. Routes and frontend in progress.
+**Status**: Backend routes and middleware are now implemented under `backend/src/api/*`; Phase 4 will complete the full migration into `backend/src/*` only.
