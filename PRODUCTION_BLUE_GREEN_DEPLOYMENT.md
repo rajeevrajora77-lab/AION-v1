@@ -2,7 +2,7 @@
 ## Zero-Downtime Updates via Elastic Beanstalk
 
 > **Your Request**: Website should NOT go down. When you push updates, users just need to refresh to see changes.
-> **Solution**: You ALREADY have this! Your current EB setup does exactly this.
+> **Solution**: Your current Elastic Beanstalk (EB) rolling deployments already provide this behavior.
 
 ---
 
@@ -26,35 +26,38 @@ Users → rajora.co.in → CloudFront/ALB
 4. **Users refresh** → Get new version
 5. **Zero downtime** → Some users on old, some on new (seamless transition)
 
-**This is EXACTLY what you described wanting!**
-
 ---
 
 ## 🎯 WHAT YOU ACTUALLY NEED
 
 You want to add:
 1. **New Python backend** (alongside current Node.js)
-2. **New UI**  
+2. **New UI**
 3. **Users refresh to see updates**
 4. **No downtime**
 
 ### Solution: Use Your Current EB + Add Shadow Paths
 
+You can introduce the new backend/UI behind shadow paths first (e.g., `/__aion_shadow/*`) and promote later.
+
 ---
 
 ## 📐 SIMPLE IMPLEMENTATION (No EC2, No ALB Config)
 
-### Step 1: Add Python Backend to Current EB
+### Step 1: Add shadow proxy in the TypeScript backend
 
-**File**: `backend/server.js` (UPDATE)
+**File**: `backend/src/app.ts` (UPDATE)
 
-```javascript
-// Add proxy to Python backend
+Your TypeScript backend already has the correct place to add shadow routing logic.
+Below is an illustrative pattern (ensure target + enablement are environment-driven):
+
+```ts
+// Example only (keep it config-driven)
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 // Shadow API endpoint - forwards to Python backend
 app.use('/__aion_shadow/api', createProxyMiddleware({
-  target: 'http://localhost:8000', // Python FastAPI
+  target: process.env.SHADOW_TARGET || 'http://localhost:8000',
   changeOrigin: true,
   pathRewrite: {
     '^/__aion_shadow/api': '/api/v1'
@@ -62,7 +65,7 @@ app.use('/__aion_shadow/api', createProxyMiddleware({
 }));
 ```
 
-### Step 2: Add Python FastAPI Backend
+### Step 2: Add Python FastAPI backend
 
 **File**: `backend/python_backend/main.py` (NEW)
 
@@ -77,16 +80,14 @@ app = FastAPI()
 async def chat_stream(request: dict):
     async def generate():
         message = request.get('message', '')
-        # Your AI logic here
         response = f"Python backend response to: {message}"
-        
-        # Stream response
+
         for chunk in response.split():
             yield f"data: {chunk}\n\n"
             await asyncio.sleep(0.1)
-        
+
         yield "data: [DONE]\n\n"
-    
+
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 @app.get("/health")
@@ -94,31 +95,34 @@ async def health():
     return {"status": "OK", "backend": "python"}
 ```
 
-### Step 3: Update Procfile
+### Step 3: Start command (Elastic Beanstalk)
 
 **File**: `backend/Procfile` (UPDATE)
 
+Use a start command that runs the compiled TypeScript output (no `server.js`):
+
 ```
-web: node server.js
-python: cd python_backend && uvicorn main:app --host 0.0.0.0 --port 8000
+web: npm run build && npm start
 ```
 
-### Step 4: Update Frontend to Use Shadow API
+**Note**: Run the Python FastAPI process using EB hooks/startup scripts (for example via `.ebextensions/*`) so it is running on the instance (typically on port 8000) before the Node shadow proxy forwards traffic.
 
-**File**: `frontend/src/App.jsx` or your main UI file
+### Step 4: Update frontend to use shadow API
 
-```javascript
+**File**: `frontend/src/App.jsx` (or your main UI file)
+
+```js
 // Change API endpoint
 const API_ENDPOINT = '/__aion_shadow/api/v1/chat';
 
 async function handleSend() {
-    const response = await fetch(API_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
-    });
-    
-    // Your streaming logic (already works!)
+  const response = await fetch(API_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: text })
+  });
+
+  // Your streaming logic (already works!)
 }
 ```
 
@@ -126,7 +130,7 @@ async function handleSend() {
 
 ## 🚀 DEPLOYMENT PROCESS (Zero Downtime)
 
-### How It Works:
+### How It Works
 
 1. **Push to GitHub**
 ```bash
@@ -137,7 +141,7 @@ git push origin main
 
 2. **GitHub Actions Deploys**
 - Builds your code
-- Creates deployment package  
+- Creates deployment package
 - Uploads to EB
 - EB does **rolling deployment**:
   - Instance 1: Gets new code → Health check → Accepts traffic
@@ -145,11 +149,9 @@ git push origin main
   - Old instances: Drained gracefully
 
 3. **User Experience**
-- Users on site: **See old version** (no disruption)
-- Users refresh: **See new version**  
-- **No 404s, no errors, no downtime**
-
-### This is EXACTLY Your Requirement!
+- Users on site: See old version (no disruption)
+- Users refresh: See new version
+- No downtime
 
 ---
 
@@ -162,9 +164,8 @@ EB automatically monitors:
 - Error rates
 
 If new version fails health checks:
-- **Deployment stops automatically**
-- **Old version stays live**
-- **Zero user impact**
+- Deployment stops automatically
+- Old version stays live
 
 ### Instant Rollback
 **AWS Console** → **Elastic Beanstalk** → **Your Environment** → **Actions** → **Deploy Previous Version**
@@ -178,71 +179,25 @@ eb deploy --version <previous-version-label>
 
 ## ✅ IMPLEMENTATION CHECKLIST
 
-### Phase 1: Add Shadow Backend (This Week)
-- [ ] Add `http-proxy-middleware` to package.json
-- [ ] Update `server.js` with shadow proxy  
-- [ ] Create `python_backend/main.py`
-- [ ] Update `Procfile` to run both Node + Python
-- [ ] Update `package.json` dependencies
-- [ ] Test locally: `npm start` (should run both)
+### Phase 1: Add Shadow Backend
+- [ ] Add `http-proxy-middleware` to `backend/package.json`
+- [ ] Update `backend/src/app.ts` with shadow proxy
+- [ ] Create `backend/python_backend/main.py`
+- [ ] Ensure EB startup runs Python (for example via `.ebextensions/*`)
+- [ ] Update Procfile to `npm run build && npm start`
 - [ ] Deploy to EB
 - [ ] Test `/__aion_shadow/api/v1/chat`
 
-### Phase 2: Update Frontend (Next Week)
+### Phase 2: Update Frontend
 - [ ] Update API endpoints to shadow paths
-- [ ] Test streaming functionality  
+- [ ] Test streaming functionality
 - [ ] Deploy frontend changes
 - [ ] Monitor for errors
 
 ### Phase 3: Switch to Primary (When Ready)
-- [ ] Change shadow paths to primary paths
-- [ ] Update DNS if needed
-- [ ] Remove old Node backend
-- [ ] Clean up proxy code
-
----
-
-## 🎓 KEY INSIGHTS
-
-### You DON'T Need:
-- ❌ EC2 manual management
-- ❌ ALB routing configuration
-- ❌ Complex Blue-Green infrastructure
-- ❌ Separate environments
-- ❌ Manual health check setup
-
-### You ALREADY Have:
-- ✅ Zero-downtime deployments (EB rolling updates)
-- ✅ Health monitoring (EB built-in)
-- ✅ Auto-scaling (EB configuration)
-- ✅ Load balancing (EB creates ALB automatically)
-- ✅ SSL/TLS (EB can manage)
-- ✅ Instant rollback (EB version history)
-
-### Your Current System IS Production-Grade!
-
-Elastic Beanstalk is used by companies like:
-- **Adobe**
-- **Samsung**  
-- **Zillow**
-- **Autodesk**
-
-It's enterprise-ready and handles:
-- Millions of requests
-- Zero-downtime deployments
-- Auto-scaling
-- Health monitoring
-- Load balancing
-
----
-
-## 💡 NEXT STEPS
-
-1. **Today**: Review this document
-2. **This Week**: Implement shadow backend
-3. **Next Week**: Update frontend
-4. **Following Week**: Test & monitor
-5. **Production Switch**: When you're confident
+- [ ] Promote routing behavior in the TS backend so `/` serves the new UI build
+- [ ] Promote `/api/*` routes to the intended backend implementation
+- [ ] Remove/retire old paths when stable
 
 ---
 
@@ -253,16 +208,3 @@ If you encounter issues:
 2. Check health: `/__aion_shadow/api/health`
 3. Review GitHub Actions logs
 4. Check this guide
-
----
-
-## 🎉 SUMMARY
-
-**You asked for**: Website never goes down, users refresh to see updates
-**You have**: Elastic Beanstalk with rolling deployments (exactly that!)
-**You need**: Just add shadow paths for gradual migration
-**Complexity**: Low (no infrastructure changes needed)
-**Risk**: Very low (current system stays working)
-**Timeline**: 2-3 weeks for complete migration
-
-**Your backend is production-ready NOW. You just need to add the Python backend alongside it!**
