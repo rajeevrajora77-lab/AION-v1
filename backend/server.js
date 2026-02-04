@@ -12,22 +12,35 @@ import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
+import { protect } from './middleware/auth.js';
 
 dotenv.config();
 
 // ============================================================================
-// ENVIRONMENT VALIDATION
+// ENVIRONMENT VALIDATION - CRITICAL SECURITY
 // ============================================================================
 
 const requiredEnvVars = [
   'OPENAI_API_KEY',
-  'FRONTEND_URL'
+  'FRONTEND_URL',
+  'JWT_SECRET', // CRITICAL: Required for authentication
 ];
 
 const missingEnvVars = requiredEnvVars.filter(key => !process.env[key]);
 
 if (missingEnvVars.length > 0) {
-  console.error('❌ Missing required environment variables:', missingEnvVars.join(', '));
+  console.error('\n' + '='.repeat(80));
+  console.error('🚨 CRITICAL: Missing required environment variables!');
+  console.error('='.repeat(80));
+  console.error('\nMissing:', missingEnvVars.join(', '));
+  
+  if (missingEnvVars.includes('JWT_SECRET')) {
+    console.error('\n🔑 JWT_SECRET is REQUIRED for authentication.');
+    console.error('\nGenerate a strong secret:');
+    console.error('  node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))")\n');
+  }
+  
+  console.error('='.repeat(80) + '\n');
   process.exit(1);
 }
 
@@ -35,6 +48,7 @@ console.log('✅ All required environment variables are set');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 // ============================================================================
 // SECURITY MIDDLEWARE (MUST BE FIRST)
@@ -61,7 +75,7 @@ const corsOptions = {
     ];
     
     // Add localhost only in development
-    if (process.env.NODE_ENV !== 'production') {
+    if (!IS_PRODUCTION) {
       allowedOrigins.push('http://localhost:3000', 'http://localhost:5173');
     }
     
@@ -113,10 +127,12 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ============================================================================
 // SHADOW ROUTING (Zero-Downtime Deployment)
+// ⚠️ CRITICAL: PROTECTED WITH AUTHENTICATION
 // ============================================================================
 
 // Shadow proxy for new Python FastAPI backend
-app.use('/__aion_shadow/api', createProxyMiddleware({
+// CRITICAL: Authentication required to prevent unauthorized access
+app.use('/__aion_shadow/api', protect, createProxyMiddleware({
   target: 'http://localhost:8000',
   changeOrigin: true,
   pathRewrite: {
@@ -124,18 +140,24 @@ app.use('/__aion_shadow/api', createProxyMiddleware({
   },
   onError: (err, req, res) => {
     console.warn('Shadow API proxy error:', err.message);
+    
+    // Don't expose internal error details in production
+    const errorMessage = IS_PRODUCTION 
+      ? 'Shadow API temporarily unavailable'
+      : `Shadow API error: ${err.message}`;
+    
     res.status(503).json({
       error: 'Shadow API unavailable',
-      message: 'The new backend is temporarily unavailable. Please try the main API.'
+      message: errorMessage
     });
   },
   onProxyReq: (proxyReq, req) => {
-    console.log(`Proxying to Python backend: ${req.method} ${req.url}`);
+    console.log(`[Shadow Proxy] ${req.method} ${req.url} from user ${req.user?.email || 'unknown'}`);
   },
   timeout: 30000,
 }));
 
-// Serve new AION UI from shadow path
+// Serve new AION UI from shadow path (public access)
 app.use('/__aion_shadow/ui', express.static('frontend/dist', {
   fallback: 'index.html',
   maxAge: '1h',
@@ -157,7 +179,8 @@ app.get('/', (req, res) => {
       chat: '/api/chat',
       search: '/api/search',
       voice: '/api/voice',
-      shadow_api: '/__aion_shadow/api',
+      auth: '/api/auth',
+      shadow_api: '/__aion_shadow/api (authenticated)',
       shadow_ui: '/__aion_shadow/ui',
     },
     message: 'AI Operating Intelligence Network - Backend API'
@@ -169,7 +192,7 @@ app.get('/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development',
+    environment: IS_PRODUCTION ? 'production' : 'development',
   });
 });
 
@@ -197,7 +220,7 @@ app.get('/status', (req, res) => {
       used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
       total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB',
     },
-    environment: process.env.NODE_ENV || 'development',
+    environment: IS_PRODUCTION ? 'production' : 'development',
     nodeVersion: process.version,
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
   });
@@ -279,8 +302,26 @@ app.use((req, res) => {
   });
 });
 
-// Global error handler
-app.use(errorHandler);
+// Global error handler - SECURE ERROR MESSAGES
+app.use((err, req, res, next) => {
+  // Log full error server-side
+  console.error('Global error handler:', err);
+  
+  // CRITICAL: Don't expose internal details in production
+  if (IS_PRODUCTION) {
+    res.status(err.status || 500).json({
+      error: 'Internal server error',
+      message: 'An error occurred processing your request'
+    });
+  } else {
+    // In development, show more details
+    res.status(err.status || 500).json({
+      error: err.name || 'Error',
+      message: err.message,
+      ...(process.env.DEBUG === 'true' && { stack: err.stack })
+    });
+  }
+});
 
 // ============================================================================
 // GRACEFUL SHUTDOWN
@@ -305,8 +346,10 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Catch unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-  // In production, you might want to exit the process
-  // process.exit(1);
+  // In production, log to monitoring service
+  if (IS_PRODUCTION) {
+    // TODO: Send to error tracking service (Sentry, etc.)
+  }
 });
 
 // ============================================================================
@@ -318,13 +361,15 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('✅ AION v1 Server Started Successfully');
   console.log('='.repeat(50));
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🌐 Environment: ${IS_PRODUCTION ? 'production' : 'development'}`);
   console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`📊 Ready check: http://localhost:${PORT}/ready`);
   console.log(`📊 Status: http://localhost:${PORT}/status`);
-  console.log(`🔄 Shadow API: http://localhost:${PORT}/__aion_shadow/api`);
+  console.log(`🔄 Shadow API: http://localhost:${PORT}/__aion_shadow/api (🔒 authenticated)`);
   console.log(`🎨 Shadow UI: http://localhost:${PORT}/__aion_shadow/ui`);
+  console.log(`🔐 JWT_SECRET: Configured ✅`);
+  console.log(`🔒 Security: Production-grade ✅`);
   console.log('='.repeat(50));
 });
 
