@@ -246,17 +246,25 @@ BING_API_KEY=your-bing-key
 # CORS
 FRONTEND_URL=https://rajora.co.in
 
+# Security
+JWT_SECRET=your-secure-jwt-secret-key-min-32-chars
+
 # Rate Limiting
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX_REQUESTS=100
 ```
 
-### 5.5 Start Backend with PM2
+### 5.5 Start Backend with PM2 (TypeScript build output)
 
 ```bash
 sudo npm install -g pm2
 cd /home/ec2-user/AION-v1/backend
-pm2 start server.js --name aion-backend
+
+# Build TypeScript → dist/
+npm run build
+
+# Start compiled output
+pm2 start dist/app.js --name aion-backend
 pm2 save
 pm2 startup
 ```
