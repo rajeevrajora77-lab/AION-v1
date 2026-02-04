@@ -12,31 +12,66 @@ import logging
 import time
 from typing import AsyncGenerator
 import os
+from openai import AsyncOpenAI
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI
+# ============================================================================
+# ENVIRONMENT VALIDATION
+# ============================================================================
+
+REQUIRED_ENV_VARS = ['OPENAI_API_KEY']
+missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
+
+if missing_vars:
+    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+    raise RuntimeError(f"Missing environment variables: {', '.join(missing_vars)}")
+
+# Initialize OpenAI client
+try:
+    openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+    logger.info("✅ OpenAI client initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize OpenAI client: {e}")
+    raise
+
+# ============================================================================
+# FASTAPI APPLICATION
+# ============================================================================
+
 app = FastAPI(
     title="AION v1 Python Backend",
-    description="Shadow/GREEN environment for zero-downtime migration",
+    description="Production AI Backend with Streaming Support",
     version="1.0.0"
 )
 
-# CORS Configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://rajora.co.in",
-        "https://www.rajora.co.in",
+# CORS Configuration - PRODUCTION SECURE
+ALLOWED_ORIGINS = [
+    "https://rajora.co.in",
+    "https://www.rajora.co.in",
+]
+
+# Add localhost only in development
+if os.getenv('NODE_ENV') != 'production':
+    ALLOWED_ORIGINS.extend([
         "http://localhost:3000",
         "http://localhost:5173",
-        "*"  # Shadow mode - allow all for testing
-    ],
+    ])
+    logger.info("Development mode: localhost origins enabled")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
+    max_age=3600,
 )
 
 # Request Models
@@ -44,57 +79,61 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
     stream: bool = True
+    model: str = "gpt-4"
+    max_tokens: int = 2000
 
 # ============================================================================
-# STREAMING ENGINE (SSE COMPLIANT)
+# STREAMING ENGINE - OPENAI INTEGRATION
 # ============================================================================
 
-async def generate_ai_response(message: str) -> AsyncGenerator[str, None]:
+async def generate_ai_response(
+    message: str,
+    model: str = "gpt-4",
+    max_tokens: int = 2000
+) -> AsyncGenerator[str, None]:
     """
-    Production-ready AI response generator with proper SSE formatting.
+    Production OpenAI streaming integration with proper SSE formatting.
     
     SSE Format:
-    data: chunk\\n\\n
-    data: [DONE]\\n\\n
-    
-    CRITICAL: No buffering, progressive streaming, proper error handling
+    data: chunk\n\n
+    data: [DONE]\n\n
     """
     try:
-        logger.info(f"Processing message: {message[:50]}...")
+        logger.info(f"Processing message with {model}: {message[:50]}...")
         
-        # TODO: Replace with actual AI API call (OpenAI, Anthropic, etc.)
-        # For now, simulating AI response
-        response_text = f"[AION Python Backend] Received your message: {message}. This is a streaming response from the Python FastAPI backend. The system is working correctly!"
+        # Create OpenAI streaming request
+        stream = await openai_client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are AION, an intelligent AI assistant."},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=max_tokens,
+            stream=True,
+            temperature=0.7,
+        )
         
-        # Stream word by word (production: chunk by API response)
-        words = response_text.split()
-        
-        for i, word in enumerate(words):
-            # SSE Format: data: <content>\\n\\n
-            chunk = f"data: {word} \\n\\n"
-            yield chunk
-            
-            # Simulate realistic streaming delay
-            await asyncio.sleep(0.05)  # 50ms between words
-            
-            # Timeout safety: Don't stream forever
-            if i > 200:  # Max 200 words
-                logger.warning("Streaming timeout limit reached")
-                break
+        # Stream chunks from OpenAI
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                # SSE Format: data: <content>\n\n
+                yield f"data: {content}\n\n"
+                await asyncio.sleep(0)  # Allow other tasks to run
         
         # Send completion signal
-        yield "data: [DONE]\\n\\n"
+        yield "data: [DONE]\n\n"
         logger.info("Streaming completed successfully")
         
     except asyncio.CancelledError:
         logger.warning("Client disconnected during streaming")
-        yield "data: [ERROR: Stream cancelled]\\n\\n"
+        yield "data: [ERROR: Stream cancelled]\n\n"
         raise
         
     except Exception as e:
-        logger.error(f"Streaming error: {e}")
-        yield f"data: [ERROR: {str(e)}]\\n\\n"
-        yield "data: [DONE]\\n\\n"
+        logger.error(f"OpenAI streaming error: {e}", exc_info=True)
+        yield f"data: [ERROR: {str(e)}]\n\n"
+        yield "data: [DONE]\n\n"
 
 # ============================================================================
 # API ENDPOINTS
@@ -103,34 +142,45 @@ async def generate_ai_response(message: str) -> AsyncGenerator[str, None]:
 @app.post("/api/v1/chat")
 async def chat_endpoint(request: ChatRequest):
     """
-    Main chat endpoint with SSE streaming.
+    Main chat endpoint with OpenAI SSE streaming.
     
     Shadow Path: /__aion_shadow/api/api/v1/chat
     Public Path (future): /api/v1/chat
     """
     try:
+        # Input validation
         if not request.message or len(request.message.strip()) == 0:
             raise HTTPException(status_code=400, detail="Message cannot be empty")
         
-        logger.info(f"Chat request received: {request.message[:100]}")
+        if len(request.message) > 10000:
+            raise HTTPException(status_code=400, detail="Message too long (max 10000 characters)")
+        
+        logger.info(f"Chat request: {request.message[:100]}")
         
         # Return streaming response
         return StreamingResponse(
-            generate_ai_response(request.message),
+            generate_ai_response(
+                message=request.message,
+                model=request.model,
+                max_tokens=request.max_tokens
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Content-Type": "text/event-stream",
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Chat endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Chat endpoint error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ============================================================================
-# HEALTH CHECK ENDPOINTS (CRITICAL FOR EB)
+# HEALTH CHECK ENDPOINTS
 # ============================================================================
 
 @app.get("/health")
@@ -143,7 +193,7 @@ async def health_check():
         "status": "OK",
         "service": "aion-python-backend",
         "version": "1.0.0",
-        "environment": "shadow/green",
+        "environment": os.getenv("NODE_ENV", "production"),
         "timestamp": time.time()
     }
 
@@ -152,13 +202,32 @@ async def readiness_check():
     """
     Readiness probe - checks if service is ready to handle traffic.
     """
-    # TODO: Add dependency checks (DB, AI API, etc.)
+    checks = {
+        "api": "healthy",
+        "openai": "unknown"
+    }
+    
+    # Test OpenAI connection
+    try:
+        # Quick validation call (won't consume many tokens)
+        await asyncio.wait_for(
+            openai_client.models.list(),
+            timeout=2.0
+        )
+        checks["openai"] = "connected"
+    except asyncio.TimeoutError:
+        checks["openai"] = "timeout"
+        logger.warning("OpenAI API check timed out")
+    except Exception as e:
+        checks["openai"] = "error"
+        logger.error(f"OpenAI API check failed: {e}")
+    
+    all_healthy = all(v in ["healthy", "connected"] for v in checks.values())
+    
     return {
-        "ready": True,
-        "checks": {
-            "api": "healthy",
-            "dependencies": "ok"
-        }
+        "ready": all_healthy,
+        "checks": checks,
+        "timestamp": time.time()
     }
 
 @app.get("/")
@@ -169,14 +238,14 @@ async def root():
     return {
         "service": "AION v1 Python Backend",
         "status": "running",
-        "environment": "shadow/green",
+        "environment": os.getenv("NODE_ENV", "production"),
         "version": "1.0.0",
         "endpoints": {
             "chat": "/api/v1/chat",
             "health": "/health",
             "ready": "/ready"
         },
-        "message": "Shadow backend is live! Ready for zero-downtime migration."
+        "message": "Production AI backend is live! 🚀"
     }
 
 # ============================================================================
@@ -188,12 +257,21 @@ async def global_exception_handler(request: Request, exc: Exception):
     """
     Global error handler - never let the service crash
     """
-    logger.error(f"Unhandled exception: {exc}")
-    return {
-        "error": "Internal server error",
-        "message": "The service encountered an error. Please try again.",
-        "status_code": 500
-    }
+    logger.error(f"Unhandled exception on {request.url}: {exc}", exc_info=True)
+    
+    # Don't expose internal errors in production
+    if os.getenv("NODE_ENV") == "production":
+        return {
+            "error": "Internal server error",
+            "message": "The service encountered an error. Please try again.",
+            "status_code": 500
+        }
+    else:
+        return {
+            "error": "Internal server error",
+            "message": str(exc),
+            "status_code": 500
+        }
 
 # ============================================================================
 # STARTUP/SHUTDOWN HOOKS
@@ -206,8 +284,9 @@ async def startup_event():
     """
     logger.info("=" * 60)
     logger.info("🚀 AION Python Backend Starting...")
-    logger.info("Environment: SHADOW/GREEN")
+    logger.info(f"Environment: {os.getenv('NODE_ENV', 'production')}")
     logger.info("Port: 8000")
+    logger.info(f"CORS Origins: {ALLOWED_ORIGINS}")
     logger.info("=" * 60)
 
 @app.on_event("shutdown")
@@ -216,31 +295,7 @@ async def shutdown_event():
     Graceful shutdown
     """
     logger.info("🛑 AION Python Backend Shutting Down...")
-    # TODO: Close DB connections, cleanup resources
-
-# ============================================================================
-# PRODUCTION NOTES
-# ============================================================================
-
-"""
-DEPLOYMENT CHECKLIST:
-✅ Async streaming implemented
-✅ SSE format compliance
-✅ Timeout protection
-✅ Error handling
-✅ Health checks
-✅ CORS configured
-✅ Logging enabled
-✅ Graceful shutdown
-
-SHADOW PATH ACCESS:
-External: https://yourdomain.com/__aion_shadow/api/api/v1/chat
-Internal (EB): Node.js proxies to localhost:8000
-
-ATOMIC SWITCH:
-When ready, change frontend from /api to /__aion_shadow/api
-Then update routing to make /__aion_shadow/api the primary path
-
-ROLLBACK:
-Revert routing change in Node.js proxy → instant rollback
-"""
+    # Close OpenAI client if needed
+    if openai_client:
+        await openai_client.close()
+        logger.info("✅ OpenAI client closed")
