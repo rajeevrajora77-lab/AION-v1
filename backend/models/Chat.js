@@ -18,9 +18,14 @@ const messageSchema = new mongoose.Schema({
 
 const chatSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     sessionId: {
       type: String,
-      required: true,
       index: true,
     },
     title: {
@@ -46,7 +51,9 @@ const chatSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Index for efficient queries
+// Indexes for efficient queries
+chatSchema.index({ userId: 1, createdAt: -1 }); // User's chats sorted by date
+chatSchema.index({ userId: 1, updatedAt: -1 }); // User's chats sorted by last update
 chatSchema.index({ sessionId: 1, createdAt: -1 });
 
 // TTL index to auto-delete after 90 days
@@ -67,6 +74,23 @@ chatSchema.methods.generateTitle = function () {
       firstMessage.content.substring(0, 50) +
       (firstMessage.content.length > 50 ? '...' : '');
   }
+};
+
+// Static method to get user's chat statistics
+chatSchema.statics.getUserStats = async function (userId) {
+  const stats = await this.aggregate([
+    { $match: { userId: mongoose.Types.ObjectId(userId) } },
+    {
+      $group: {
+        _id: null,
+        totalChats: { $sum: 1 },
+        totalMessages: { $sum: { $size: '$messages' } },
+        avgMessagesPerChat: { $avg: { $size: '$messages' } },
+      },
+    },
+  ]);
+
+  return stats[0] || { totalChats: 0, totalMessages: 0, avgMessagesPerChat: 0 };
 };
 
 const Chat = mongoose.model('Chat', chatSchema);
