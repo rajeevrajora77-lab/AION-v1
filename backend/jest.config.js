@@ -12,8 +12,11 @@ module.exports = {
     '!jest.config.js'
   ],
   
+  // UPDATED: Look for .cjs test files (CommonJS)
   testMatch: [
+    '**/__tests__/**/*.test.cjs',
     '**/__tests__/**/*.test.js',
+    '**/*.test.cjs',
     '**/*.test.js'
   ],
   
@@ -29,8 +32,8 @@ module.exports = {
   
   verbose: true,
   
-  // Ignore ES module errors
-  moduleFileExtensions: ['js', 'json'],
+  // Support both .js and .cjs extensions
+  moduleFileExtensions: ['js', 'cjs', 'json'],
   
   // Don't transform node_modules
   transformIgnorePatterns: [
