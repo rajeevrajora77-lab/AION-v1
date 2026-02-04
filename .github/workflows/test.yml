@@ -21,10 +21,39 @@ jobs:
       uses: actions/setup-node@v3
       with:
         node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: './backend/package-lock.json'
+    
+    - name: Check for package-lock.json
+      id: check-lock
+      working-directory: ./backend
+      run: |
+        if [ -f package-lock.json ]; then
+          echo "lock_exists=true" >> $GITHUB_OUTPUT
+          echo "✅ package-lock.json exists"
+        else
+          echo "lock_exists=false" >> $GITHUB_OUTPUT
+          echo "⚠️ package-lock.json missing, will generate"
+        fi
+    
+    - name: Generate package-lock.json (if missing)
+      if: steps.check-lock.outputs.lock_exists == 'false'
+      working-directory: ./backend
+      run: |
+        echo "📦 Generating package-lock.json..."
+        npm install --package-lock-only
+        echo "✅ package-lock.json generated"
         
     - name: Install backend dependencies
       working-directory: ./backend
-      run: npm ci
+      run: |
+        if [ -f package-lock.json ]; then
+          echo "📦 Installing with npm ci (clean install)..."
+          npm ci
+        else
+          echo "📦 Installing with npm install..."
+          npm install
+        fi
     
     - name: Run backend tests
       working-directory: ./backend
