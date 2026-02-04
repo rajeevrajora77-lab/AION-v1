@@ -10,14 +10,14 @@ import { loadEnvOrFail, getRuntimeConfig } from './config/env.js';
 import { buildCorsOptions } from './config/cors.js';
 import { connectMongoIfConfigured, mongoReadyState } from './infra/db/mongo.js';
 
-// Legacy modules still used during Phase 3 migration (behavior preserved, structure changes).
-import chatRoutes from '../routes/chat.js';
-import searchRoutes from '../routes/search.js';
-import voiceRoutes from '../routes/voice.js';
-import healthRoutes from '../routes/health.js';
-import authRoutes from '../routes/auth.js';
-import { requestLogger } from '../middleware/requestLogger.js';
-import { protect } from '../middleware/auth.js';
+// Phase 3 migration: wrap legacy modules behind src/api/* so app bootstrap is clean.
+import chatRoutes from './api/routes/chat.js';
+import searchRoutes from './api/routes/search.js';
+import voiceRoutes from './api/routes/voice.js';
+import healthRoutes from './api/routes/health.js';
+import authRoutes from './api/routes/auth.js';
+import { requestLogger } from './api/middleware/requestLogger.js';
+import { protect } from './api/middleware/auth.js';
 
 export function createApp(): Express {
   loadEnvOrFail();
@@ -72,7 +72,7 @@ export function createApp(): Express {
   app.use(express.json({ limit: cfg.http.bodyLimit }));
   app.use(express.urlencoded({ extended: true, limit: cfg.http.bodyLimit }));
 
-  // Shadow routing (kept for now, but Python backend removed; target must be set explicitly or removed in Phase 4)
+  // Shadow routing (kept for now; Phase 4 will remove or re-implement properly)
   if (cfg.shadow.enabled) {
     app.use(
       '/__aion_shadow/api',
