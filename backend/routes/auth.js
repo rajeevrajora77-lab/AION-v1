@@ -1,8 +1,9 @@
-const express = require('express');
+import express from 'express';
+import User from '../models/User.js';
+import { protect, authorize } from '../middleware/auth.js';
+import logger from '../utils/logger.js';
+
 const router = express.Router();
-const User = require('../models/User');
-const { protect, authorize } = require('../middleware/auth');
-const logger = require('../utils/logger');
 
 // @route   POST /api/auth/signup
 // @desc    Register new user
@@ -16,6 +17,14 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Please provide email, password, and name'
+      });
+    }
+
+    // Validate password strength
+    if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password must be at least 8 characters long'
       });
     }
 
@@ -35,10 +44,11 @@ router.post('/signup', async (req, res) => {
       name
     });
 
-    // Generate token
+    // Generate tokens
     const token = user.generateAuthToken();
+    const refreshToken = user.generateRefreshToken();
 
-    logger.info('User registered successfully', {
+    logger.logAuth('User registered', {
       userId: user._id,
       email: user.email
     });
@@ -47,6 +57,7 @@ router.post('/signup', async (req, res) => {
       success: true,
       data: {
         token,
+        refreshToken,
         user: {
           id: user._id,
           email: user.email,
@@ -56,7 +67,7 @@ router.post('/signup', async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('Signup error', { error: error.message });
+    logger.logApiError(error, { route: 'POST /api/auth/signup' });
     res.status(500).json({
       success: false,
       error: 'Server error during registration'
@@ -79,36 +90,15 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Find user and include password
-    const user = await User.findOne({ email }).select('+password');
-    
-    if (!user) {
-      logger.warn('Login attempt with non-existent email', { email });
+    // Find user by credentials (includes password comparison and locking logic)
+    let user;
+    try {
+      user = await User.findByCredentials(email, password);
+    } catch (err) {
+      logger.logSecurity('Failed login attempt', { email });
       return res.status(401).json({
         success: false,
-        error: 'Invalid credentials'
-      });
-    }
-
-    // Check if user is active
-    if (!user.isActive) {
-      logger.warn('Login attempt for inactive account', { 
-        userId: user._id, 
-        email 
-      });
-      return res.status(401).json({
-        success: false,
-        error: 'Account has been deactivated'
-      });
-    }
-
-    // Verify password
-    const isPasswordValid = await user.comparePassword(password);
-    if (!isPasswordValid) {
-      logger.warn('Login attempt with invalid password', { email });
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid credentials'
+        error: err.message || 'Invalid credentials'
       });
     }
 
@@ -116,10 +106,11 @@ router.post('/login', async (req, res) => {
     user.lastLogin = new Date();
     await user.save();
 
-    // Generate token
+    // Generate tokens
     const token = user.generateAuthToken();
+    const refreshToken = user.generateRefreshToken();
 
-    logger.info('User logged in successfully', {
+    logger.logAuth('User logged in', {
       userId: user._id,
       email: user.email
     });
@@ -128,6 +119,7 @@ router.post('/login', async (req, res) => {
       success: true,
       data: {
         token,
+        refreshToken,
         user: {
           id: user._id,
           email: user.email,
@@ -138,7 +130,7 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('Login error', { error: error.message });
+    logger.logApiError(error, { route: 'POST /api/auth/login' });
     res.status(500).json({
       success: false,
       error: 'Server error during login'
@@ -158,9 +150,9 @@ router.get('/me', protect, async (req, res) => {
       data: user
     });
   } catch (error) {
-    logger.error('Get profile error', { 
+    logger.logApiError(error, { 
       userId: req.user?._id, 
-      error: error.message 
+      route: 'GET /api/auth/me'
     });
     res.status(500).json({
       success: false,
@@ -178,7 +170,17 @@ router.put('/update-profile', protect, async (req, res) => {
     const fieldsToUpdate = {};
 
     if (name) fieldsToUpdate.name = name;
-    if (email) fieldsToUpdate.email = email;
+    if (email) {
+      // Check if new email already exists
+      const existingUser = await User.findOne({ email, _id: { $ne: req.user._id } });
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          error: 'Email already in use'
+        });
+      }
+      fieldsToUpdate.email = email;
+    }
 
     const user = await User.findByIdAndUpdate(
       req.user._id,
@@ -186,7 +188,7 @@ router.put('/update-profile', protect, async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    logger.info('User profile updated', {
+    logger.logAuth('User profile updated', {
       userId: user._id,
       updatedFields: Object.keys(fieldsToUpdate)
     });
@@ -196,9 +198,9 @@ router.put('/update-profile', protect, async (req, res) => {
       data: user
     });
   } catch (error) {
-    logger.error('Update profile error', { 
-      userId: req.user?._id, 
-      error: error.message 
+    logger.logApiError(error, { 
+      userId: req.user?._id,
+      route: 'PUT /api/auth/update-profile'
     });
     res.status(500).json({
       success: false,
@@ -221,12 +223,19 @@ router.put('/change-password', protect, async (req, res) => {
       });
     }
 
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'New password must be at least 8 characters long'
+      });
+    }
+
     const user = await User.findById(req.user._id).select('+password');
 
     // Verify current password
     const isPasswordValid = await user.comparePassword(currentPassword);
     if (!isPasswordValid) {
-      logger.warn('Failed password change attempt', { userId: user._id });
+      logger.logSecurity('Failed password change attempt', { userId: user._id });
       return res.status(401).json({
         success: false,
         error: 'Current password is incorrect'
@@ -237,16 +246,16 @@ router.put('/change-password', protect, async (req, res) => {
     user.password = newPassword;
     await user.save();
 
-    logger.info('User password changed', { userId: user._id });
+    logger.logAuth('User password changed', { userId: user._id });
 
     res.json({
       success: true,
       message: 'Password changed successfully'
     });
   } catch (error) {
-    logger.error('Change password error', { 
-      userId: req.user?._id, 
-      error: error.message 
+    logger.logApiError(error, { 
+      userId: req.user?._id,
+      route: 'PUT /api/auth/change-password'
     });
     res.status(500).json({
       success: false,
@@ -264,16 +273,16 @@ router.delete('/deactivate', protect, async (req, res) => {
     user.isActive = false;
     await user.save();
 
-    logger.info('User account deactivated', { userId: user._id });
+    logger.logAuth('User account deactivated', { userId: user._id });
 
     res.json({
       success: true,
       message: 'Account deactivated successfully'
     });
   } catch (error) {
-    logger.error('Deactivate account error', { 
-      userId: req.user?._id, 
-      error: error.message 
+    logger.logApiError(error, { 
+      userId: req.user?._id,
+      route: 'DELETE /api/auth/deactivate'
     });
     res.status(500).json({
       success: false,
@@ -295,7 +304,7 @@ router.get('/users', protect, authorize('admin'), async (req, res) => {
       data: users
     });
   } catch (error) {
-    logger.error('Get users error', { error: error.message });
+    logger.logApiError(error, { route: 'GET /api/auth/users' });
     res.status(500).json({
       success: false,
       error: 'Server error retrieving users'
@@ -303,4 +312,24 @@ router.get('/users', protect, authorize('admin'), async (req, res) => {
   }
 });
 
-module.exports = router;
+// @route   GET /api/auth/stats
+// @desc    Get user statistics (admin only)
+// @access  Private/Admin
+router.get('/stats', protect, authorize('admin'), async (req, res) => {
+  try {
+    const stats = await User.getStats();
+
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    logger.logApiError(error, { route: 'GET /api/auth/stats' });
+    res.status(500).json({
+      success: false,
+      error: 'Server error retrieving stats'
+    });
+  }
+});
+
+export default router;
