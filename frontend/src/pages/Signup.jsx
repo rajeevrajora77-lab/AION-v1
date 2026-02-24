@@ -37,7 +37,9 @@ function Signup() {
       await signup(formData.email, formData.password, formData.name);
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.message || 'Signup failed. Please try again.');
+      // Fix: Backend returns error message in 'error' field, not 'message'
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || 'Signup failed. Please try again.';
+      setError(errorMessage);
     }
   };
 
