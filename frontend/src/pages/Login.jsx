@@ -25,7 +25,10 @@ const Login = () => {
       
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed');
+      const errorMessage = !err.response 
+        ? 'Network Error: Unable to connect to the server. Please check your backend deployment.' 
+        : (err.response?.data?.error || 'Login failed');
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

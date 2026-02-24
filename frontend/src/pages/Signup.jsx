@@ -28,8 +28,8 @@ function Signup() {
       return;
     }
 
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters long');
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters long');
       return;
     }
 
@@ -37,8 +37,10 @@ function Signup() {
       await signup(formData.email, formData.password, formData.name);
       navigate('/dashboard');
     } catch (err) {
-      // Fix: Backend returns error message in 'error' field, not 'message'
-      const errorMessage = err.response?.data?.error || err.response?.data?.message || 'Signup failed. Please try again.';
+      // Fix: Better error messaging for network issues vs backend responses
+      const errorMessage = !err.response 
+        ? 'Network Error: Unable to connect to the server. Please check your backend deployment.' 
+        : (err.response?.data?.error || err.response?.data?.message || 'Signup failed. Please try again.');
       setError(errorMessage);
     }
   };
