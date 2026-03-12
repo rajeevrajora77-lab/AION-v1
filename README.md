@@ -1,208 +1,185 @@
-# AION v1 - AI Operating Intelligence Network
+# AION v1
 
-A production-ready AI web application featuring real-time chat, intelligent search, and voice interaction capabilities.
+AION (AI Operations Node) is a production-grade conversational AI platform with multi-model LLM routing, persistent session memory, voice interaction, and web search integration. It's the primary user-facing AI layer of the Rajora AI ecosystem.
 
-## Features
+The core idea: route each user request to the right model at the right cost, maintain full conversation context across sessions, and deliver responses via chat, voice, or search — all from a single unified API.
 
-### Core Capabilities
-- **AI Chat System**: ChatGPT-like conversational interface with streaming responses
-- **Intelligent Search Engine**: Custom search powered by BingSerpAPI with clean UI
-- **Voice Assistant**: Speech-to-text and text-to-speech interactions
-- **Real-time Streaming**: Live AI response generation
-- **Chat History**: MongoDB-powered conversation persistence
-- **Rate Limiting**: Production-grade API protection
-- **Error Handling**: Comprehensive error management
+---
 
-## Tech Stack
+## What's Inside
 
-### Frontend
-- React 18
-- Vite
-- Axios
-- Modern CSS3
+**LLM routing** — Requests are classified by complexity and routed to GPT-4, GPT-3.5, or a fallback model. Simple queries don't burn expensive API quota.
 
-### Backend
-- Node.js
-- Express.js
-- MongoDB
-- OpenAI-compatible API
-- dotenv
+**Streaming responses** — The frontend receives token-by-token output via SSE. No loading spinners waiting for the full response.
 
-### AI APIs
-- OpenAI API (GPT-4/GPT-3.5)
-- Bing Search API / SerpAPI
-- Web Speech API
+**Session persistence** — Conversation history is stored in MongoDB, keyed by session ID. Context survives page refreshes and multiple browser tabs.
 
-## Prerequisites
+**Voice interface** — Web Speech API handles STT on the client. TTS synthesis is served from the backend. No third-party voice SDK dependency.
 
-- Node.js 18 and npm
-- MongoDB (local or Atlas)
-- OpenAI API key
-- Bing Search API key or SerpAPI key (optional)
+**Web search** — Bing Search API / SerpAPI integration with a clean results UI. The AI can ground responses in live web data when needed.
 
-## Setup Instructions
+**Rate limiting** — Per-IP and per-session rate limits via `express-rate-limit`. Configurable via environment variables.
 
-### 1. Clone Repository
+---
+
+## Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18, Vite, Axios |
+| Backend | Node.js, Express.js |
+| Database | MongoDB Atlas (Mongoose) |
+| LLMs | OpenAI GPT-4 / GPT-3.5 |
+| Search | Bing Search API, SerpAPI |
+| Voice | Web Speech API (client-side) |
+| Auth | JWT |
+| Security | Helmet.js, CORS, express-rate-limit |
+
+---
+
+## Repository Structure
+
+```
+AION-v1/
+├── backend/
+│   ├── routes/
+│   │   ├── chat.js          Streaming + non-streaming chat endpoints
+│   │   ├── search.js        Web search integration
+│   │   └── voice.js         Voice transcription + synthesis
+│   ├── models/
+│   │   └── Chat.js          MongoDB session schema
+│   ├── middleware/
+│   │   ├── rateLimiter.js   Per-IP and per-session limiting
+│   │   └── errorHandler.js  Sanitized error responses
+│   ├── utils/
+│   │   └── openai.js        LLM routing and streaming helpers
+│   └── server.js
+└── frontend/
+    ├── src/
+    │   ├── components/
+    │   │   ├── Chat.jsx
+    │   │   ├── Search.jsx
+    │   │   ├── Voice.jsx
+    │   │   └── Navigation.jsx
+    │   └── services/api.js
+    └── vite.config.js
+```
+
+---
+
+## Setup
 
 ```bash
 git clone https://github.com/rajeevrajora77-lab/AION-v1.git
-cd aion
+cd AION-v1
 ```
 
-### 2. Environment Variables
-
-Create `.env` file in the backend directory:
-
-```env
-# Server Configuration
-PORT=5000
-NODE_ENV=production
-
-# MongoDB Connection
-MONGODB_URI=mongodb://localhost:27017/aion
-
-# OpenAI API
-OPENAI_API_KEY=your-openai-api-key-here
-OPENAI_MODEL=gpt-4
-OPENAI_MAX_TOKENS=2000
-
-# Search API (choose one)
-BING_API_KEY=your-bing-api-key-here
-# OR
-SERPAPI_KEY=your-serpapi-key-here
-
-# CORS Configuration
-FRONTEND_URL=http://localhost:5173
-
-# Rate Limiting
-RATE_LIMIT_WINDOW_MS=900000
-RATE_LIMIT_MAX_REQUESTS=100
-```
-
-### 3. Backend Setup
-
+**Backend:**
 ```bash
 cd backend
+cp .env.example .env
 npm install
 npm start
+# Runs on http://localhost:5000
 ```
 
-Server runs on `http://localhost:5000`
-
-### 4. Frontend Setup
-
+**Frontend:**
 ```bash
 cd frontend
 npm install
 npm run dev
+# Runs on http://localhost:5173
 ```
-
-Frontend runs on `http://localhost:5173`
-
-## API Endpoints
-
-### Chat
-- `POST /api/chat` - Stream AI responses
-- `GET /api/chat/history` - Retrieve chat history
-- `DELETE /api/chat/history/:id` - Delete conversation
-- `POST /api/chat/complete` - Non-streaming chat completion
-- `POST /api/chat/clear` - Clear all messages in a session
-- `GET /api/chat/sessions` - List all chat sessions
-
-### Search
-- `POST /api/search` - Execute web search (returns title, snippet, source URL)
-- `GET /api/search/suggestions` - Get search suggestions
-
-### Voice
-- `POST /api/voice/process` - Process voice transcription
-- `POST /api/voice/synthesize` - Text-to-speech endpoint
-- `GET /api/voice/config` - Get voice configuration
-
-## Project Structure
-
-```
-aion/
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Chat.jsx
-│   │   │   ├── Search.jsx
-│   │   │   ├── Voice.jsx
-│   │   │   └── Navigation.jsx
-│   │   ├── services/
-│   │   │   └── api.js
-│   │   ├── styles/
-│   │   │   └── App.css
-│   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   └── package.json
-│   ├── vite.config.js
-│   └── index.html
-├── backend/
-│   ├── routes/
-│   │   ├── chat.js
-│   │   ├── search.js
-│   │   └── voice.js
-│   ├── models/
-│   │   └── Chat.js
-│   ├── middleware/
-│   │   ├── rateLimiter.js
-│   │   └── errorHandler.js
-│   ├── utils/
-│   │   └── openai.js
-│   ├── server.js
-│   ├── package.json
-│   └── .env.example
-├── README.md
-└── LICENSE
-```
-
-## Security Features
-
-- Rate limiting (100 requests/15 minutes)
-- Environment variable protection
-- CORS configuration
-- Input validation
-- Error sanitization
-- Helmet.js for HTTP headers
-
-## Deployment
-
-### Backend Deployment (Railway/Render/Heroku)
-
-1. Set environment variables
-2. Deploy from GitHub
-3. Update MONGODB_URI to Atlas cluster
-
-### Frontend Deployment (Vercel/Netlify)
-
-1. Build: `npm run build`
-2. Deploy dist folder
-3. Update API_BASE_URL in production
-
-## Roadmap - AION v2
-
-- User authentication & authorization
-- Multi-model support (Anthropic, Gemini)
-- Advanced RAG with vector databases
-- File upload analysis
-- Collaborative chat rooms
-- Mobile application (React Native)
-- Plugin ecosystem
-- Custom fine-tuned models
-- Analytics dashboard
-- WebSocket real-time updates
-- Docker containerization
-- Kubernetes orchestration
-
-## Contributing
-
-Contributions welcome! Please read CONTRIBUTING.md
-
-## License
-
-MIT License - See LICENSE file
 
 ---
 
-Built with ❤️ by the AION Team
+## Environment Variables
+
+```env
+# Server
+PORT=5000
+NODE_ENV=production
+
+# MongoDB
+MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/aion
+
+# OpenAI
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4
+OPENAI_MAX_TOKENS=2000
+
+# Search (one of these)
+BING_API_KEY=...
+SERPAPI_KEY=...
+
+# CORS
+FRONTEND_URL=http://localhost:5173
+
+# Rate limiting
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+```
+
+---
+
+## API Reference
+
+**Chat**
+```
+POST   /api/chat              Stream AI response (SSE)
+POST   /api/chat/complete     Non-streaming completion
+GET    /api/chat/history      Retrieve session history
+GET    /api/chat/sessions     List all sessions
+DELETE /api/chat/history/:id  Delete conversation
+POST   /api/chat/clear        Clear session messages
+```
+
+**Search**
+```
+POST   /api/search                Execute web search
+GET    /api/search/suggestions    Search suggestions
+```
+
+**Voice**
+```
+POST   /api/voice/process     Process voice transcription
+POST   /api/voice/synthesize  Text-to-speech
+GET    /api/voice/config      Voice configuration
+```
+
+---
+
+## Roadmap
+
+- Multi-model support (Claude, Gemini) with cost-aware routing
+- RAG pipeline with vector database for document-grounded answers
+- File upload analysis (PDFs, images)
+- User authentication and per-user session isolation
+- WebSocket upgrade for true bidirectional streaming
+- Mobile client (React Native)
+- Custom fine-tuned model integration via Revive-OS
+
+---
+
+## Deployment
+
+Backend deploys on Railway or AWS Elastic Beanstalk via Docker. Frontend deploys on Vercel.
+
+```bash
+# Production build
+cd frontend && npm run build
+
+# Docker
+docker build -t aion-backend ./backend
+docker run -p 5000:5000 --env-file .env aion-backend
+```
+
+See CI/CD config in `.github/workflows/ci.yml`.
+
+---
+
+## License
+
+MIT — see [LICENSE](./LICENSE)
+
+**Rajora AI** · [rajora.live](https://rajora.live) · rajeev@rajora.live
