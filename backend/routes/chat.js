@@ -1,9 +1,9 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Chat from '../models/Chat.js';
 import { streamChatCompletion, createChatCompletion } from '../utils/openai.js';
 import { protect } from '../middleware/auth.js';
 import { chatLimiter } from '../middleware/rateLimiter.js';
-import { isValidObjectId } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -41,7 +41,7 @@ router.post('/', protect, chatLimiter, async (req, res) => {
 
     // Create/get session
     let chat = null;
-    if (sessionId && isValidObjectId(sessionId)) {
+    if (sessionId && mongoose.Types.ObjectId.isValid(sessionId)) {
       // Only allow access to own sessions
       chat = await Chat.findOne({
         _id: sessionId,
@@ -199,7 +199,7 @@ router.get('/history', protect, async (req, res) => {
       return res.status(400).json({ error: 'Session ID required' });
     }
 
-    if (!isValidObjectId(sessionId)) {
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
       return res.status(400).json({ error: 'Invalid session ID format' });
     }
 
@@ -275,7 +275,7 @@ router.post('/complete', protect, chatLimiter, async (req, res) => {
     }
 
     let chat = null;
-    if (sessionId && isValidObjectId(sessionId)) {
+    if (sessionId && mongoose.Types.ObjectId.isValid(sessionId)) {
       // Only allow access to own sessions
       chat = await Chat.findOne({
         _id: sessionId,
@@ -340,7 +340,7 @@ router.delete('/history/:id', protect, async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!isValidObjectId(id)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: 'Invalid session ID format' });
     }
 
@@ -379,7 +379,7 @@ router.post('/clear', protect, async (req, res) => {
       return res.status(400).json({ error: 'Session ID required' });
     }
 
-    if (!isValidObjectId(sessionId)) {
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
       return res.status(400).json({ error: 'Invalid session ID format' });
     }
 
