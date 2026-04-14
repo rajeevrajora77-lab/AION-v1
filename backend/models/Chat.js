@@ -22,7 +22,7 @@ const chatSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-      index: true,
+      // No `index: true` here — compound index below covers userId queries
     },
     sessionId: {
       type: String,
@@ -38,15 +38,7 @@ const chatSchema = new mongoose.Schema(
       totalTokens: Number,
       averageResponseTime: Number,
     },
-    createdAt: {
-      type: Date,
-      default: Date.now,
-      index: true,
-    },
-    updatedAt: {
-      type: Date,
-      default: Date.now,
-    },
+    // No manual createdAt/updatedAt — Mongoose `timestamps: true` handles this
   },
   { timestamps: true }
 );
@@ -58,12 +50,6 @@ chatSchema.index({ sessionId: 1, createdAt: -1 });
 
 // TTL index to auto-delete after 90 days
 chatSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7776000 });
-
-// Auto-update updatedAt on save
-chatSchema.pre('save', function (next) {
-  this.updatedAt = Date.now();
-  next();
-});
 
 // Generate conversation title from first user message
 chatSchema.methods.generateTitle = function () {
@@ -79,7 +65,7 @@ chatSchema.methods.generateTitle = function () {
 // Static method to get user's chat statistics
 chatSchema.statics.getUserStats = async function (userId) {
   const stats = await this.aggregate([
-    { $match: { userId: mongoose.Types.ObjectId(userId) } },
+    { $match: { userId: new mongoose.Types.ObjectId(userId) } },
     {
       $group: {
         _id: null,
@@ -92,6 +78,9 @@ chatSchema.statics.getUserStats = async function (userId) {
 
   return stats[0] || { totalChats: 0, totalMessages: 0, avgMessagesPerChat: 0 };
 };
+
+// Message limit constant — exported for route guards
+chatSchema.statics.MESSAGE_LIMIT = 200;
 
 const Chat = mongoose.model('Chat', chatSchema);
 

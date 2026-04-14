@@ -9,28 +9,29 @@ export const useAuthStore = create(
       token: null,
       isAuthenticated: false,
 
-      setUser: (user) => set({ user, isAuthenticated: true }),
-      
-      setToken: (token) => set({ token }),
-
-            login: async (email, password) => {
+      // ATOMIC login — single source of truth via Zustand persist
+      // Do NOT call localStorage.setItem separately — persist middleware handles it
+      login: async (email, password) => {
         const response = await api.post('/auth/login', { email, password });
         const { token, user } = response.data.data;
-        localStorage.setItem('token', token);
         set({ user, token, isAuthenticated: true });
         return response.data;
+      },
+
+      // Direct login for use by pages that already have token/user (e.g., Login.jsx)
+      setAuth: (token, user) => {
+        set({ token, user, isAuthenticated: true });
       },
 
       signup: async (email, password, name) => {
         const response = await api.post('/auth/signup', { email, password, name });
         const { token, user } = response.data.data;
-        localStorage.setItem('token', token);
         set({ user, token, isAuthenticated: true });
         return response.data;
       },
       
       logout: () => {
-        localStorage.removeItem('token');
+        // Single source of truth — Zustand persist auto-clears storage
         set({ user: null, token: null, isAuthenticated: false });
       },
       

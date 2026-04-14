@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useAuthStore } from '../store/authStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -23,8 +24,8 @@ api.interceptors.request.use(
     // Add request ID to all requests
     config.headers['X-Request-ID'] = generateRequestId();
 
-    // Attach JWT token from localStorage (set by authStore on login/signup)
-    const token = localStorage.getItem('token');
+    // Attach JWT token from Zustand persist (single source of truth)
+    const token = useAuthStore.getState().token;
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
@@ -68,7 +69,7 @@ const getErrorType = (error) => {
   return 'UNKNOWN_ERROR';
 };
 
-// Response interceptor: Enhanced error handling
+// Response interceptor: 401 auto-redirect + Enhanced error handling
 api.interceptors.response.use(
   (response) => {
     // Log successful responses in development
@@ -84,6 +85,17 @@ api.interceptors.response.use(
   (error) => {
     const requestId = error.config?.headers?.['X-Request-ID'];
     const errorType = getErrorType(error);
+
+    // 401 interceptor — clear stale auth and redirect to login
+    if (error.response?.status === 401) {
+      const currentPath = window.location.pathname;
+      // Don't redirect if already on auth pages
+      if (currentPath !== '/login' && currentPath !== '/signup') {
+        useAuthStore.getState().logout();
+        window.location.href = '/login';
+      }
+    }
+
     const errorInfo = {
       requestId,
       type: errorType,

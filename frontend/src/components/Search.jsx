@@ -96,7 +96,7 @@ function Search() {
             <div key={idx} style={styles.resultItem}>
               <h3
                 style={styles.resultTitle}
-                onClick={() => openLink(result.url)}
+                onClick={() => openLink(result.link)}
                 role="button"
                 tabIndex="0"
               >
@@ -105,12 +105,12 @@ function Search() {
               <p style={styles.resultSnippet}>{result.snippet}</p>
               <p style={styles.resultUrl}>
                 <a
-                  href={result.url}
+                  href={result.link}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={styles.link}
                 >
-                  {result.url}
+                  {result.link}
                 </a>
               </p>
             </div>

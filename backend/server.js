@@ -1,5 +1,4 @@
 import express from 'express';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
@@ -12,7 +11,7 @@ import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
-import { protect } from './middleware/auth.js';
+import logger from './utils/logger.js';
 
 dotenv.config();
 
@@ -24,17 +23,17 @@ const requiredEnvVars = ['FRONTEND_URL', 'JWT_SECRET'];
 const missingEnvVars = requiredEnvVars.filter((key) => !process.env[key]);
 
 if (!hasLlmKey) {
-  console.error('CRITICAL: Neither GROQ_API_KEY nor OPENAI_API_KEY is set!');
-  console.error('Get a FREE Groq API key at: https://console.groq.com');
+  logger.error('CRITICAL: Neither GROQ_API_KEY nor OPENAI_API_KEY is set!');
+  logger.error('Get a FREE Groq API key at: https://console.groq.com');
   process.exit(1);
 }
 
 if (missingEnvVars.length > 0) {
-  console.error('CRITICAL: Missing required environment variables:', missingEnvVars.join(', '));
+  logger.error('CRITICAL: Missing required environment variables: ' + missingEnvVars.join(', '));
   process.exit(1);
 }
 
-console.log('✅ All required environment variables are set');
+logger.info('All required environment variables are set');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -57,7 +56,7 @@ app.use(
   })
 );
 
-// CORS - allow chat.rajora.co.in (and www/apex for future use)
+// CORS — allow chat.rajora.co.in (and www/apex for future use)
 const corsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = [
@@ -73,7 +72,8 @@ const corsOptions = {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('CORS not allowed'));
+      // Return clean 403 instead of throwing an error
+      callback(null, false);
     }
   },
   credentials: true,
@@ -88,7 +88,7 @@ app.use(cors(corsOptions));
 // Request logging
 app.use(requestLogger);
 
-// Rate limiting
+// Global rate limiting — BEFORE body parsing to prevent memory exhaustion
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -100,7 +100,7 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
-    console.warn(`Rate limit exceeded for IP: ${req.ip}`);
+    logger.warn('Rate limit exceeded', { ip: req.ip });
     res.status(429).json({
       error: 'Too many requests',
       message: 'You have exceeded the rate limit. Please try again later.',
@@ -110,12 +110,12 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Body parsing — AFTER rate limiter, with reduced size limit (1MB, not 10MB)
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // ============================================================================
-// ROOT & HEALTH ENDPOINTS
+// ROOT ENDPOINT
 // ============================================================================
 app.get('/', (req, res) => {
   res.json({
@@ -133,40 +133,6 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: IS_PRODUCTION ? 'production' : 'development',
-  });
-});
-
-app.get('/ready', (req, res) => {
-  const ready = {
-    server: true,
-    mongodb: mongoose.connection.readyState === 1,
-    timestamp: new Date().toISOString(),
-  };
-  const allReady = Object.values(ready).every((v) => v === true || typeof v === 'string');
-  res.status(allReady ? 200 : 503).json({ ready: allReady, services: ready });
-});
-
-app.get('/status', (req, res) => {
-  res.json({
-    status: 'running',
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-    memory: {
-      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
-      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB',
-    },
-    environment: IS_PRODUCTION ? 'production' : 'development',
-    nodeVersion: process.version,
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-  });
-});
-
 // ============================================================================
 // MONGODB CONNECTION
 // ============================================================================
@@ -177,57 +143,37 @@ if (process.env.MONGODB_URI) {
       socketTimeoutMS: 45000,
     })
     .then(() => {
-      console.log('✅ MongoDB connected successfully');
+      logger.info('MongoDB connected successfully');
     })
     .catch((err) => {
-      console.error('⚠️ MongoDB connection failed:', err.message);
-      console.log('⚠️ Server will continue without database.');
+      logger.error('MongoDB connection failed: ' + err.message);
+      logger.warn('Server will continue without database.');
     });
   mongoose.connection.on('error', (err) => {
-    console.error('❌ MongoDB connection error:', err.message);
+    logger.error('MongoDB connection error: ' + err.message);
   });
   mongoose.connection.on('disconnected', () => {
-    console.warn('⚠️ MongoDB disconnected');
+    logger.warn('MongoDB disconnected');
   });
 } else {
-  console.warn('⚠️ MONGODB_URI not set. Running without database.');
+  logger.warn('MONGODB_URI not set. Running without database.');
 }
 
 // ============================================================================
-// API ROUTES
+// API ROUTES — No try/catch. If a route module fails to load, the server MUST crash.
+// A server running without auth routes is worse than a server not starting at all.
 // ============================================================================
-try {
-  app.use('/api/chat', chatRoutes);
-  app.use('/api/auth', authRoutes);
-  console.log('✅ Chat and Auth routes loaded');
-} catch (error) {
-  console.error('❌ Failed to load chat/auth routes:', error.message);
-}
-
-try {
-  app.use('/api/search', searchRoutes);
-  console.log('✅ Search routes loaded');
-} catch (error) {
-  console.error('❌ Failed to load search routes:', error.message);
-}
-
-try {
-  app.use('/api/voice', voiceRoutes);
-  console.log('✅ Voice routes loaded');
-} catch (error) {
-  console.error('❌ Failed to load voice routes:', error.message);
-}
-
-try {
-  app.use(healthRoutes);
-  console.log('✅ Health routes loaded');
-} catch (error) {
-  console.error('❌ Failed to load health routes:', error.message);
-}
+app.use('/api/chat', chatRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/voice', voiceRoutes);
+app.use(healthRoutes);
+logger.info('All routes loaded successfully');
 
 // ============================================================================
 // ERROR HANDLERS
 // ============================================================================
+// 404 handler — must be after all routes
 app.use((req, res) => {
   res.status(404).json({
     error: 'Route not found',
@@ -236,50 +182,46 @@ app.use((req, res) => {
   });
 });
 
-app.use((err, req, res, next) => {
-  console.error('Global error handler:', err);
-  if (IS_PRODUCTION) {
-    res.status(err.status || 500).json({ error: 'Internal server error' });
-  } else {
-    res.status(err.status || 500).json({ error: err.name, message: err.message });
-  }
-});
+// Global error handler — uses the imported errorHandler middleware
+app.use(errorHandler);
 
 // ============================================================================
-// GRACEFUL SHUTDOWN
+// GRACEFUL SHUTDOWN — store HTTP server reference
 // ============================================================================
-const gracefulShutdown = (signal) => {
-  console.log(`\n⚠️ ${signal} received, closing server gracefully`);
-  if (mongoose.connection.readyState === 1) {
-    mongoose.connection.close(false, () => {
-      console.log('✅ MongoDB connection closed');
-      process.exit(0);
-    });
-  } else {
+const server = app.listen(PORT, '0.0.0.0', () => {
+  logger.info('='.repeat(50));
+  logger.info('AION v1 Server Started Successfully');
+  logger.info('='.repeat(50));
+  logger.info(`Server running on port ${PORT}`);
+  logger.info(`Environment: ${IS_PRODUCTION ? 'production' : 'development'}`);
+  logger.info(`Frontend URL: ${process.env.FRONTEND_URL}`);
+  logger.info(`Health check: http://localhost:${PORT}/health`);
+  logger.info(`LLM: ${process.env.GROQ_API_KEY ? 'Groq (free)' : 'OpenAI'}`);
+  logger.info('='.repeat(50));
+});
+
+const gracefulShutdown = async (signal) => {
+  logger.info(`${signal} received — shutting down gracefully`);
+  server.close(async () => {
+    logger.info('HTTP server closed');
+    if (mongoose.connection.readyState === 1) {
+      await mongoose.connection.close();
+      logger.info('MongoDB connection closed');
+    }
     process.exit(0);
-  }
+  });
+  // Force shutdown after 10s if graceful fails
+  setTimeout(() => {
+    logger.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-// ============================================================================
-// START SERVER
-// ============================================================================
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('='.repeat(50));
-  console.log('✅ AION v1 Server Started Successfully');
-  console.log('='.repeat(50));
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Environment: ${IS_PRODUCTION ? 'production' : 'development'}`);
-  console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🤖 LLM: ${process.env.GROQ_API_KEY ? 'Groq (free)' : 'OpenAI'}`);
-  console.log('='.repeat(50));
+  logger.error('Unhandled Rejection', { reason: String(reason) });
 });
 
 export default app;

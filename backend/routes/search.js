@@ -1,10 +1,13 @@
 import express from 'express';
 import { performSearch } from '../utils/search.js';
+import { protect } from '../middleware/auth.js';
+import { searchLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
 // POST /api/search - Execute web search
-router.post('/', async (req, res) => {
+// PROTECTED + RATE LIMITED
+router.post('/', protect, searchLimiter, async (req, res) => {
   try {
     const { query } = req.body;
 
@@ -32,7 +35,8 @@ router.post('/', async (req, res) => {
 });
 
 // GET /api/search/suggestions - Get search suggestions
-router.get('/suggestions', async (req, res) => {
+// PROTECTED
+router.get('/suggestions', protect, async (req, res) => {
   try {
     const { q } = req.query;
 

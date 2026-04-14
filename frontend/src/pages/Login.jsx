@@ -5,7 +5,7 @@ import api from '../services/api';
 
 const Login = () => {
   const navigate = useNavigate();
-  const { setUser, setToken } = useAuthStore();
+  const { setAuth } = useAuthStore();
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,9 +19,8 @@ const Login = () => {
       const response = await api.post('/auth/login', formData);
       const { token, user } = response.data.data;
       
-      setToken(token);
-      setUser(user);
-      localStorage.setItem('token', token);
+      // ATOMIC — single call, single source of truth (Zustand persist handles storage)
+      setAuth(token, user);
       
       navigate('/dashboard');
     } catch (err) {

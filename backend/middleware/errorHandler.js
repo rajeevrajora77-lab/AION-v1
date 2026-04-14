@@ -1,11 +1,14 @@
+import logger from '../utils/logger.js';
+
 // Global error handler middleware
 export function errorHandler(err, req, res, next) {
-  // Log error details
-  console.error('Error:', {
+  // Log error details via Winston (not console)
+  logger.error('Unhandled error', {
     message: err.message,
     stack: err.stack,
     path: req.path,
     method: req.method,
+    requestId: req.id,
   });
 
   // Set default status code and message

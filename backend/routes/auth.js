@@ -1,14 +1,24 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import User from '../models/User.js';
 import { protect, authorize } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
 
+// IP-level rate limiter for auth endpoints — prevents brute-force across emails
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,                   // max 20 auth attempts per IP per window
+  message: { success: false, error: 'Too many auth attempts. Try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // @route   POST /api/auth/signup
 // @desc    Register new user
 // @access  Public
-router.post('/signup', async (req, res) => {
+router.post('/signup', authLimiter, async (req, res) => {
   try {
     const { email, password, name } = req.body;
 
@@ -78,7 +88,7 @@ router.post('/signup', async (req, res) => {
 // @route   POST /api/auth/login
 // @desc    Login user
 // @access  Public
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -147,7 +157,15 @@ router.get('/me', protect, async (req, res) => {
 
     res.json({
       success: true,
-      data: user
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isActive: user.isActive,
+        createdAt: user.createdAt,
+        preferences: user.preferences,
+      }
     });
   } catch (error) {
     logger.logApiError(error, { 
@@ -195,7 +213,15 @@ router.put('/update-profile', protect, async (req, res) => {
 
     res.json({
       success: true,
-      data: user
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isActive: user.isActive,
+        createdAt: user.createdAt,
+        preferences: user.preferences,
+      }
     });
   } catch (error) {
     logger.logApiError(error, { 

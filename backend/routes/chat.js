@@ -1,28 +1,25 @@
 import express from 'express';
 import Chat from '../models/Chat.js';
 import { streamChatCompletion, createChatCompletion } from '../utils/openai.js';
-import mongoose from 'mongoose';
 import { protect } from '../middleware/auth.js';
+import { chatLimiter } from '../middleware/rateLimiter.js';
+import { isValidObjectId } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
 
 // Configuration
-const MAX_MESSAGE_LENGTH = 10000; // Match Python backend
-
-// Helper function to validate MongoDB ObjectId
-function isValidObjectId(id) {
-  return mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === id;
-}
+const MAX_MESSAGE_LENGTH = 10000;
+const MESSAGE_LIMIT = Chat.MESSAGE_LIMIT || 200;
 
 // POST /api/chat - Stream AI response
-// PROTECTED ROUTE - Requires authentication
-router.post('/', protect, async (req, res) => {
+// PROTECTED + RATE LIMITED
+router.post('/', protect, chatLimiter, async (req, res) => {
   try {
-    console.log('\n📥 Incoming Chat Request');
-    console.log(' - Timestamp:', new Date().toISOString());
-    console.log(' - User:', req.user?.email || 'Unknown');
-    console.log(' - User ID:', req.user?._id || 'Unknown');
+    logger.info('Incoming Chat Request', {
+      user: req.user?.email,
+      userId: req.user?._id,
+    });
 
     const { message, sessionId } = req.body;
 
@@ -37,12 +34,12 @@ router.post('/', protect, async (req, res) => {
       });
     }
 
-    console.log(' - Message length:', trimmed.length);
-    console.log(' - Session ID:', sessionId || 'new session');
+    logger.info('Chat message details', {
+      messageLength: trimmed.length,
+      sessionId: sessionId || 'new session',
+    });
 
     // Create/get session
-    // NOTE: Frontend may send a custom string sessionId (e.g. session_xxx).
-    // Only try to look up from DB if it's a valid MongoDB ObjectId.
     let chat = null;
     if (sessionId && isValidObjectId(sessionId)) {
       // Only allow access to own sessions
@@ -50,16 +47,21 @@ router.post('/', protect, async (req, res) => {
         _id: sessionId,
         userId: req.user._id
       });
-      if (!chat) {
-        // Session not found or belongs to another user - create new
-        chat = null;
-      }
     }
 
     if (!chat) {
       chat = new Chat({
         messages: [],
         userId: req.user._id
+      });
+    }
+
+    // Enforce message limit per session
+    if (chat.messages.length >= MESSAGE_LIMIT) {
+      return res.status(400).json({
+        error: 'Session message limit reached',
+        message: `This session has reached the ${MESSAGE_LIMIT} message limit. Please start a new session.`,
+        code: 'SESSION_MESSAGE_LIMIT'
       });
     }
 
@@ -81,15 +83,21 @@ router.post('/', protect, async (req, res) => {
     res.setHeader('Transfer-Encoding', 'chunked');
     res.setHeader('X-Accel-Buffering', 'no');
 
+    // Detect client disconnect to stop wasting LLM tokens
+    let clientDisconnected = false;
+    req.on('close', () => {
+      clientDisconnected = true;
+    });
+
     // Sanitize messages for LLM API — Groq/OpenAI only accept {role, content}
-    // Mongoose subdocuments include extra fields (_id, timestamp) that cause 400 errors
     const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
 
-    // Stream response - streamChatCompletion accepts (messages, onChunk, model)
+    // Stream response
     let fullResponse = '';
     await streamChatCompletion(
       apiMessages,
       (chunk) => {
+        if (clientDisconnected) return; // Don't write to closed socket
         fullResponse += chunk;
         res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
       }
@@ -103,8 +111,10 @@ router.post('/', protect, async (req, res) => {
     });
     await chat.save();
 
-    res.write(`data: ${JSON.stringify({ done: true, sessionId: chat._id })}\n\n`);
-    res.end();
+    if (!clientDisconnected) {
+      res.write(`data: ${JSON.stringify({ done: true, sessionId: chat._id })}\n\n`);
+      res.end();
+    }
 
     logger.info('Chat request completed', {
       userId: req.user._id,
@@ -114,18 +124,14 @@ router.post('/', protect, async (req, res) => {
     });
 
   } catch (error) {
-    console.log('\n=======================');
-    console.log('CHAT API ERROR');
-    console.log('=======================');
-    console.log('Route: POST /api/chat');
-    console.log('Timestamp:', new Date().toISOString());
-    console.log('User:', req.user?.email || 'Unknown');
-    console.log('Error Message:', error?.message || 'Unknown error');
-    console.log('Error Name:', error?.name || 'N/A');
-    console.log('Error Status:', error?.status || error?.response?.status || 'N/A');
-    console.log('Error Code:', error?.code || 'N/A');
-    console.log('Full Error:', JSON.stringify(error, Object.getOwnPropertyNames(error)).slice(0, 1000));
-    console.log('=======================\n');
+    logger.error('Chat API Error', {
+      route: 'POST /api/chat',
+      user: req.user?.email || 'Unknown',
+      errorMessage: error?.message || 'Unknown error',
+      errorName: error?.name || 'N/A',
+      errorStatus: error?.status || error?.response?.status || 'N/A',
+      errorCode: error?.code || 'N/A',
+    });
 
     logger.logApiError(error, {
       route: 'POST /api/chat',
@@ -145,7 +151,8 @@ router.post('/', protect, async (req, res) => {
 
     // Classify OpenAI/Groq unavailability
     if (error.message === 'LLM API key is required but not configured' ||
-        error.message === 'OpenAI unavailable') {
+        error.message === 'OpenAI unavailable' ||
+        error.message === 'Circuit breaker is OPEN - service unavailable') {
       return res.status(503).json({
         error: 'AI service temporarily unavailable',
       });
@@ -183,7 +190,7 @@ router.post('/', protect, async (req, res) => {
 });
 
 // GET /api/chat/history - Get chat history
-// PROTECTED ROUTE - Requires authentication
+// PROTECTED
 router.get('/history', protect, async (req, res) => {
   try {
     const { sessionId } = req.query;
@@ -222,7 +229,7 @@ router.get('/history', protect, async (req, res) => {
 });
 
 // GET /api/chat/sessions - List all sessions
-// PROTECTED ROUTE - Requires authentication
+// PROTECTED
 router.get('/sessions', protect, async (req, res) => {
   try {
     // Only show user's own sessions
@@ -235,7 +242,7 @@ router.get('/sessions', protect, async (req, res) => {
       sessions.map((session) => ({
         sessionId: session._id,
         messageCount: session.messages.length,
-        lastMessage: session.messages[session.messages.length - 1]?.content || '',
+        lastMessage: (session.messages[session.messages.length - 1]?.content || '').substring(0, 100),
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
       }))
@@ -250,8 +257,8 @@ router.get('/sessions', protect, async (req, res) => {
 });
 
 // POST /api/chat/complete - Non-streaming completion
-// PROTECTED ROUTE - Requires authentication
-router.post('/complete', protect, async (req, res) => {
+// PROTECTED + RATE LIMITED
+router.post('/complete', protect, chatLimiter, async (req, res) => {
   try {
     const { message, sessionId } = req.body;
 
@@ -283,6 +290,15 @@ router.post('/complete', protect, async (req, res) => {
       });
     }
 
+    // Enforce message limit per session
+    if (chat.messages.length >= MESSAGE_LIMIT) {
+      return res.status(400).json({
+        error: 'Session message limit reached',
+        message: `This session has reached the ${MESSAGE_LIMIT} message limit. Please start a new session.`,
+        code: 'SESSION_MESSAGE_LIMIT'
+      });
+    }
+
     chat.messages.push({
       role: 'user',
       content: trimmed,
@@ -293,7 +309,7 @@ router.post('/complete', protect, async (req, res) => {
     // Sanitize messages for LLM API — only {role, content} allowed
     const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
 
-    // Get full response - createChatCompletion returns a completion object
+    // Get full response
     const completion = await createChatCompletion(apiMessages);
     const responseContent = completion.choices[0].message.content;
 
@@ -319,7 +335,7 @@ router.post('/complete', protect, async (req, res) => {
 });
 
 // DELETE /api/chat/history/:id - Delete conversation
-// PROTECTED ROUTE - Requires authentication
+// PROTECTED
 router.delete('/history/:id', protect, async (req, res) => {
   try {
     const { id } = req.params;
@@ -354,7 +370,7 @@ router.delete('/history/:id', protect, async (req, res) => {
 });
 
 // POST /api/chat/clear - Clear all messages in session
-// PROTECTED ROUTE - Requires authentication
+// PROTECTED
 router.post('/clear', protect, async (req, res) => {
   try {
     const { sessionId } = req.body;

@@ -20,10 +20,13 @@ const UserSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
-      match: [
-        /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
-        'Please provide a valid email',
-      ],
+      validate: {
+        validator: function(email) {
+          // Simple, linear-time regex — safe against ReDoS, accepts TLDs >3 chars
+          return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+        },
+        message: 'Please provide a valid email address',
+      },
     },
     password: {
       type: String,
@@ -109,7 +112,7 @@ UserSchema.pre('save', async function (next) {
 
   try {
     // Generate salt
-    const salt = await bcrypt.genSalt(12);
+    const salt = await bcrypt.genSalt(10); // OWASP-recommended for web apps (~100ms vs ~300ms at 12)
     
     // Hash password
     this.password = await bcrypt.hash(this.password, salt);
@@ -145,7 +148,10 @@ UserSchema.methods.generateAuthToken = function () {
     role: this.role,
   };
 
-  const secret = process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('FATAL: JWT_SECRET environment variable is not set. Refusing to sign tokens.');
+  }
   const expiresIn = process.env.JWT_EXPIRE || '7d';
 
   return jwt.sign(payload, secret, {
@@ -163,7 +169,10 @@ UserSchema.methods.generateRefreshToken = function () {
     type: 'refresh',
   };
 
-  const secret = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET || 'dev-secret-key';
+  const secret = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('FATAL: JWT_REFRESH_SECRET/JWT_SECRET environment variable is not set. Refusing to sign refresh tokens.');
+  }
   const expiresIn = '30d';
 
   return jwt.sign(payload, secret, {

@@ -8,17 +8,10 @@ function Chat() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState(null);
-  const [sessionId, setSessionId] = useState(null);
+  const [sessionId, setSessionId] = useState(null); // null = backend will assign a real MongoDB ObjectId
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const { token: storeToken } = useAuthStore();
-
-  // Initialize session ID on mount (will be replaced by real MongoDB _id from backend)
-  useEffect(() => {
-    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    setSessionId(id);
-  }, []);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -40,13 +33,17 @@ function Chat() {
     // Create abort controller for this request
     abortControllerRef.current = new AbortController();
 
-    // Get JWT token
-    const token = localStorage.getItem('token') || storeToken || (() => {
-      try {
-        const persisted = JSON.parse(localStorage.getItem('auth-storage') || '{}');
-        return persisted?.state?.token || null;
-      } catch { return null; }
-    })();
+    // Get JWT token from Zustand store (single source of truth)
+    const token = useAuthStore.getState().token;
+
+    if (!token) {
+      setError('You are not logged in. Please sign in to use the chat.');
+      setIsStreaming(false);
+      return;
+    }
+
+    // SSE buffer for handling partial JSON chunks across boundaries
+    let sseBuffer = '';
 
     try {
       const response = await fetch(`${API_BASE_URL}/chat`, {
@@ -54,17 +51,23 @@ function Chat() {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
           message: userMessage,
-          sessionId: sessionId,
+          sessionId: sessionId, // null on first message → backend creates new session
         }),
         signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
         const errorText = await response.text();
+        // Handle 401 — redirect to login
+        if (response.status === 401) {
+          useAuthStore.getState().logout();
+          window.location.href = '/login';
+          return;
+        }
         throw new Error(`Backend error: ${response.status} - ${errorText}`);
       }
 
@@ -76,21 +79,23 @@ function Chat() {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+        // Accumulate buffer across read() boundaries to handle partial JSON
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
+        sseBuffer = lines.pop(); // last element may be incomplete — keep in buffer
 
         for (const line of lines) {
           if (!line.trim()) continue;
           if (line.startsWith('data: ')) {
-            try {
-              const jsonStr = line.slice(6);
-              // Handle Groq's [DONE] sentinel
-              if (jsonStr.trim() === '[DONE]') break;
+            const raw = line.slice(6).trim();
+            // Handle Groq's [DONE] sentinel
+            if (raw === '[DONE]') break;
 
-              const data = JSON.parse(jsonStr);
+            try {
+              const data = JSON.parse(raw);
 
               if (data.done) {
-                // Backend sent done event with real MongoDB sessionId - update it
+                // Backend sent done event with real MongoDB sessionId — update it
                 if (data.sessionId) {
                   setSessionId(String(data.sessionId));
                 }
@@ -119,8 +124,9 @@ function Chat() {
                 });
               }
             } catch (parseErr) {
-              if (parseErr.message !== '[DONE]') {
-                console.error('Failed to parse SSE data:', parseErr);
+              // Log parse errors instead of silently swallowing
+              if (parseErr.message && !parseErr.message.includes('[DONE]')) {
+                console.warn('SSE parse error on line:', raw, parseErr);
               }
             }
           }
@@ -156,8 +162,7 @@ function Chat() {
 
   const handleNewChat = () => {
     setMessages([]);
-    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    setSessionId(id);
+    setSessionId(null); // Reset — backend will assign fresh ObjectId on first message
     setError(null);
   };
 
@@ -208,7 +213,7 @@ function Chat() {
         <header className="h-14 border-b border-[#262626] flex items-center px-6 justify-between">
           <div className="font-medium">AION Assistant</div>
           <div className="text-xs text-gray-500">
-            {sessionId?.slice(0, 15)}...
+            {sessionId ? `${String(sessionId).slice(0, 8)}...` : 'New Session'}
           </div>
         </header>
 
