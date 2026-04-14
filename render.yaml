@@ -1,0 +1,26 @@
+# Render.com Deployment Configuration for AION v1 Backend
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: aion-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: FRONTEND_URL
+        value: https://chat.rajora.co.in
+      # Set these in Render dashboard (do NOT commit real keys):
+      - key: GROQ_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MONGODB_URI
+        sync: false
+    healthCheckPath: /health
+    autoDeploy: true
