@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useAuthStore } from '../store/authStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -12,6 +13,7 @@ function Chat() {
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const lastAssistantIndexRef = useRef(-1);
+  const { token: storeToken } = useAuthStore();
 
   // Initialize session ID on mount
   useEffect(() => {
@@ -39,8 +41,13 @@ function Chat() {
     // Create abort controller for this request
     abortControllerRef.current = new AbortController();
 
-    // Get JWT token from localStorage (set by authStore on login/signup)
-    const token = localStorage.getItem('token');
+    // Get JWT token - check plain localStorage key first, then Zustand store, then persisted state
+    const token = localStorage.getItem('token') || storeToken || (() => {
+      try {
+        const persisted = JSON.parse(localStorage.getItem('auth-storage') || '{}');
+        return persisted?.state?.token || null;
+      } catch { return null; }
+    })();
 
     try {
       const response = await fetch(`${API_BASE_URL}/chat`, {
