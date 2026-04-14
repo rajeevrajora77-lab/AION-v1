@@ -17,11 +17,17 @@ export const api = axios.create({
   },
 });
 
-// Request interceptor: Add request ID and logging
+// Request interceptor: Add auth token, request ID and logging
 api.interceptors.request.use(
   (config) => {
     // Add request ID to all requests
     config.headers['X-Request-ID'] = generateRequestId();
+
+    // Attach JWT token from localStorage (set by authStore on login/signup)
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`;
+    }
 
     // Log requests in development mode
     if (import.meta.env.DEV) {
@@ -32,7 +38,6 @@ api.interceptors.request.use(
         timestamp: new Date().toISOString(),
       });
     }
-
     return config;
   },
   (error) => {
@@ -79,7 +84,6 @@ api.interceptors.response.use(
   (error) => {
     const requestId = error.config?.headers?.['X-Request-ID'];
     const errorType = getErrorType(error);
-
     const errorInfo = {
       requestId,
       type: errorType,
@@ -92,15 +96,12 @@ api.interceptors.response.use(
       // Include response data if available
       data: error.response?.data,
     };
-
     // Log error with full context
     console.error('[API Error]', errorInfo);
-
     // Attach enriched error information
     error.metadata = errorInfo;
     error.errorType = errorType;
     error.requestId = requestId;
-
     return Promise.reject(error);
   }
 );
