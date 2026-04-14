@@ -12,10 +12,9 @@ function Chat() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const lastAssistantIndexRef = useRef(-1);
   const { token: storeToken } = useAuthStore();
 
-  // Initialize session ID on mount
+  // Initialize session ID on mount (will be replaced by real MongoDB _id from backend)
   useEffect(() => {
     const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     setSessionId(id);
@@ -28,20 +27,20 @@ function Chat() {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!input.trim() || isStreaming || !sessionId) return;
+    if (!input.trim() || isStreaming) return;
+
     setError(null);
     const userMessage = input.trim();
     setInput('');
-    
+
     // Add user message to chat
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setIsStreaming(true);
-    lastAssistantIndexRef.current = messages.length;
 
     // Create abort controller for this request
     abortControllerRef.current = new AbortController();
 
-    // Get JWT token - check plain localStorage key first, then Zustand store, then persisted state
+    // Get JWT token
     const token = localStorage.getItem('token') || storeToken || (() => {
       try {
         const persisted = JSON.parse(localStorage.getItem('auth-storage') || '{}');
@@ -71,8 +70,7 @@ function Chat() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let assistantMessage = '';
-      let isFirstChunk = true;
+      let assistantMessageAdded = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -86,32 +84,44 @@ function Chat() {
           if (line.startsWith('data: ')) {
             try {
               const jsonStr = line.slice(6);
+              // Handle Groq's [DONE] sentinel
+              if (jsonStr.trim() === '[DONE]') break;
+
               const data = JSON.parse(jsonStr);
 
               if (data.done) {
-                console.log('Stream completed', data);
+                // Backend sent done event with real MongoDB sessionId - update it
+                if (data.sessionId) {
+                  setSessionId(String(data.sessionId));
+                }
                 break;
               }
 
+              if (data.error) {
+                throw new Error(data.error);
+              }
+
               if (data.content) {
-                assistantMessage += data.content;
-                
-                // Add or update assistant message
                 setMessages(prev => {
                   const updated = [...prev];
-                  if (isFirstChunk) {
+                  if (!assistantMessageAdded) {
+                    // Add initial assistant message
                     updated.push({ role: 'assistant', content: data.content });
-                    isFirstChunk = false;
+                    assistantMessageAdded = true;
                   } else {
-                    if (updated[lastAssistantIndexRef.current]) {
-                      updated[lastAssistantIndexRef.current].content += data.content;
-                    }
+                    // Append to last message (which is the assistant message we added)
+                    updated[updated.length - 1] = {
+                      ...updated[updated.length - 1],
+                      content: updated[updated.length - 1].content + data.content,
+                    };
                   }
                   return updated;
                 });
               }
             } catch (parseErr) {
-              console.error('Failed to parse SSE data:', parseErr);
+              if (parseErr.message !== '[DONE]') {
+                console.error('Failed to parse SSE data:', parseErr);
+              }
             }
           }
         }
@@ -121,8 +131,9 @@ function Chat() {
         console.log('Stream cancelled by user');
         setMessages(prev => {
           const updated = [...prev];
-          if (updated[lastAssistantIndexRef.current]) {
-            updated[lastAssistantIndexRef.current].content += '\n[Stream cancelled]';
+          const last = updated[updated.length - 1];
+          if (last && last.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: last.content + '\n[Stream cancelled]' };
           }
           return updated;
         });
@@ -153,21 +164,21 @@ function Chat() {
   return (
     <div className="bg-[#0f0f0f] text-white h-screen flex overflow-hidden">
       {/* Sidebar */}
-      <aside 
+      <aside
         className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-[#171717] border-r border-[#262626] flex flex-col transition-all duration-300`}
       >
         <div className="p-4 flex items-center justify-between">
           {!sidebarCollapsed && <div className="text-xl font-bold tracking-wide">AION</div>}
-          <button 
+          <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="text-gray-400 hover:text-white text-sm"
           >
-            ☰
+            &#9776;
           </button>
         </div>
         {!sidebarCollapsed && (
           <>
-            <button 
+            <button
               onClick={handleNewChat}
               className="mx-4 mb-4 py-2 rounded-xl bg-[#262626] hover:bg-[#303030] text-sm"
             >
@@ -185,7 +196,7 @@ function Chat() {
               </div>
             </div>
             <div className="p-4 border-t border-[#262626] text-xs text-gray-400">
-              Free Plan • AION v1
+              Free Plan &bull; AION v1
             </div>
           </>
         )}
@@ -209,8 +220,8 @@ function Chat() {
             messages.map((msg, idx) => (
               <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`${
-                  msg.role === 'user' 
-                    ? 'bg-[#262626] px-4 py-2 rounded-2xl max-w-xl text-sm' 
+                  msg.role === 'user'
+                    ? 'bg-[#262626] px-4 py-2 rounded-2xl max-w-xl text-sm'
                     : 'bg-[#1a1a1a] border border-[#262626] px-4 py-3 rounded-2xl max-w-xl text-sm leading-relaxed'
                 }`}>
                   {msg.content}
@@ -230,7 +241,7 @@ function Chat() {
 
         {/* Input box */}
         <footer className="border-t border-[#262626] p-4">
-          <form 
+          <form
             onSubmit={handleSendMessage}
             className="max-w-4xl mx-auto flex items-center gap-3 bg-[#171717] border border-[#262626] rounded-2xl px-4 py-3"
           >
