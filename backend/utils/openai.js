@@ -8,7 +8,6 @@ dotenv.config();
 // Compatible with OpenAI SDK - just change baseURL
 // Get free API key at: https://console.groq.com
 // ============================================
-
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -37,7 +36,7 @@ if (useGroq) {
 
 // ============================================
 // MODEL CONFIGURATION
-// Groq free models: llama-3.1-8b-instant, llama-3.3-70b-versatile, mixtral-8x7b-32768
+// Groq free models: llama-3.1-8b-instant, llama-3.3-70b-versatile
 // OpenAI models: gpt-4o-mini, gpt-3.5-turbo
 // ============================================
 const MODELS = {
@@ -59,11 +58,9 @@ const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
       return await fn();
     } catch (error) {
       if (attempt === maxRetries) throw error;
-
       const isRetryable =
         error.status === 429 || error.status === 503 || error.status === 502;
       if (!isRetryable) throw error;
-
       const delay = baseDelay * Math.pow(2, attempt);
       console.warn(`LLM request failed (attempt ${attempt + 1}), retrying in ${delay}ms...`);
       await sleep(delay);
@@ -79,48 +76,31 @@ const routeModel = (message) => {
   const isComplex =
     wordCount > 50 ||
     /\b(explain|analyze|compare|summarize|write|create|code|debug|implement)\b/i.test(message);
-
   return isComplex ? MODELS.powerful : MODELS.fast;
 };
 
 // ============================================
 // STREAMING CHAT COMPLETION
+// Accepts a callback function (onChunk) that receives each text chunk.
+// This matches how chat.js calls it: streamChatCompletion(messages, (chunk) => {...})
 // ============================================
-export const streamChatCompletion = async (messages, res, model = null) => {
+export const streamChatCompletion = async (messages, onChunk, model = null) => {
   const selectedModel = model || routeModel(messages[messages.length - 1]?.content || '');
 
-  try {
-    const stream = await retryWithBackoff(() =>
-      client.chat.completions.create({
-        model: selectedModel,
-        messages,
-        max_tokens: MAX_TOKENS,
-        stream: true,
-        temperature: 0.7,
-      })
-    );
+  const stream = await retryWithBackoff(() =>
+    client.chat.completions.create({
+      model: selectedModel,
+      messages,
+      max_tokens: MAX_TOKENS,
+      stream: true,
+      temperature: 0.7,
+    })
+  );
 
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
-
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
-      }
-    }
-
-    res.write('data: [DONE]\n\n');
-    res.end();
-  } catch (error) {
-    console.error('Streaming error:', error.message);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Streaming failed', message: error.message });
-    } else {
-      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-      res.end();
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content || '';
+    if (content) {
+      onChunk(content);
     }
   }
 };
@@ -130,7 +110,6 @@ export const streamChatCompletion = async (messages, res, model = null) => {
 // ============================================
 export const createChatCompletion = async (messages, model = null) => {
   const selectedModel = model || routeModel(messages[messages.length - 1]?.content || '');
-
   return retryWithBackoff(() =>
     client.chat.completions.create({
       model: selectedModel,
@@ -150,7 +129,6 @@ export const createEmbedding = async (text) => {
     console.warn('Embeddings not supported with Groq. Skipping.');
     return null;
   }
-
   return retryWithBackoff(() =>
     client.embeddings.create({
       model: 'text-embedding-3-small',
