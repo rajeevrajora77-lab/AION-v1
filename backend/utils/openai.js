@@ -86,41 +86,23 @@ const routeModel = (message) => {
 // ============================================
 // STREAMING CHAT COMPLETION
 // ============================================
-export const streamChatCompletion = async (messages, res, model = null) => {
+export const streamChatCompletion = async (messages, onChunk, model = null) => {
   const selectedModel = model || routeModel(messages[messages.length - 1]?.content || '');
 
-  try {
-    const stream = await retryWithBackoff(() =>
-      client.chat.completions.create({
-        model: selectedModel,
-        messages,
-        max_tokens: MAX_TOKENS,
-        stream: true,
-        temperature: 0.7,
-      })
-    );
+  const stream = await retryWithBackoff(() =>
+    client.chat.completions.create({
+      model: selectedModel,
+      messages,
+      max_tokens: MAX_TOKENS,
+      stream: true,
+      temperature: 0.7,
+    })
+  );
 
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
-
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
-      }
-    }
-
-    res.write('data: [DONE]\n\n');
-    res.end();
-  } catch (error) {
-    console.error('Streaming error:', error.message);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Streaming failed', message: error.message });
-    } else {
-      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-      res.end();
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content || '';
+    if (content) {
+      onChunk(content);
     }
   }
 };
