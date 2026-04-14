@@ -27,7 +27,6 @@ function Chat() {
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!input.trim() || isStreaming || !sessionId) return;
-
     setError(null);
     const userMessage = input.trim();
     setInput('');
@@ -40,12 +39,16 @@ function Chat() {
     // Create abort controller for this request
     abortControllerRef.current = new AbortController();
 
+    // Get JWT token from localStorage (set by authStore on login/signup)
+    const token = localStorage.getItem('token');
+
     try {
       const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           message: userMessage,
@@ -73,7 +76,6 @@ function Chat() {
 
         for (const line of lines) {
           if (!line.trim()) continue;
-
           if (line.startsWith('data: ')) {
             try {
               const jsonStr = line.slice(6);
@@ -156,7 +158,6 @@ function Chat() {
             ☰
           </button>
         </div>
-
         {!sidebarCollapsed && (
           <>
             <button 
@@ -165,7 +166,6 @@ function Chat() {
             >
               + New Chat
             </button>
-
             <div className="flex-1 overflow-y-auto px-2 space-y-2">
               <div className="p-2 rounded-lg bg-[#1f1f1f] text-sm truncate">
                 Current Session
@@ -177,7 +177,6 @@ function Chat() {
                 Previous Chat 2
               </div>
             </div>
-
             <div className="p-4 border-t border-[#262626] text-xs text-gray-400">
               Free Plan • AION v1
             </div>
