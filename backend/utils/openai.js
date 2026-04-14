@@ -4,251 +4,159 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // ============================================
-// CONFIGURATION & VALIDATION
+// GROQ (Free Open-Source LLM) CONFIGURATION
+// Compatible with OpenAI SDK - just change baseURL
+// Get free API key at: https://console.groq.com
 // ============================================
 
-// Validate environment on startup
-if (!process.env.OPENAI_API_KEY) {
-  console.error('❌ CRITICAL: OPENAI_API_KEY environment variable is not set');
-  console.error('Please set OPENAI_API_KEY in:');
-  console.error('  - Local: .env file');
-  console.error('  - AWS EB: Environment Variables in EB Console');
-  throw new Error('OPENAI_API_KEY is required but not configured');
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+// Use Groq if available (free), else fall back to OpenAI
+const useGroq = !!GROQ_API_KEY;
+
+if (!GROQ_API_KEY && !OPENAI_API_KEY) {
+  console.error('CRITICAL: Neither GROQ_API_KEY nor OPENAI_API_KEY is set!');
+  console.error('Get a FREE Groq API key at: https://console.groq.com');
+  throw new Error('LLM API key is required but not configured');
 }
 
-const OPENAI_CONFIG = {
-  apiKey: process.env.OPENAI_API_KEY,
-  timeout: 15000, // 15 seconds
-  maxRetries: 2,
-  defaultModel: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+// Initialize OpenAI-compatible client
+const client = useGroq
+  ? new OpenAI({
+      apiKey: GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+    })
+  : new OpenAI({ apiKey: OPENAI_API_KEY });
+
+if (useGroq) {
+  console.log('✅ Using Groq (free open-source LLM) for chat');
+} else {
+  console.log('✅ Using OpenAI for chat');
+}
+
+// ============================================
+// MODEL CONFIGURATION
+// Groq free models: llama-3.1-8b-instant, llama-3.3-70b-versatile, mixtral-8x7b-32768
+// OpenAI models: gpt-4o-mini, gpt-3.5-turbo
+// ============================================
+const MODELS = {
+  fast: useGroq ? 'llama-3.1-8b-instant' : 'gpt-4o-mini',
+  standard: useGroq ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini',
+  powerful: useGroq ? 'llama-3.3-70b-versatile' : 'gpt-4o',
 };
 
-console.log('✅ OpenAI Configuration:');
-console.log('  - API Key: Configured (length:', OPENAI_CONFIG.apiKey.length, ')');
-console.log('  - Model:', OPENAI_CONFIG.defaultModel);
-console.log('  - Timeout:', OPENAI_CONFIG.timeout, 'ms');
-console.log('  - Max Retries:', OPENAI_CONFIG.maxRetries);
-
-// Initialize OpenAI client
-let openai = null;
-
-try {
-  openai = new OpenAI({
-    apiKey: OPENAI_CONFIG.apiKey,
-    timeout: OPENAI_CONFIG.timeout,
-    maxRetries: OPENAI_CONFIG.maxRetries,
-  });
-  console.log('✅ OpenAI client initialized successfully');
-} catch (error) {
-  console.error('❌ Failed to initialize OpenAI client:', error.message);
-  throw error;
-}
+const MAX_TOKENS = parseInt(process.env.OPENAI_MAX_TOKENS) || 2000;
 
 // ============================================
-// HELPER FUNCTIONS
+// UTILITY FUNCTIONS
 // ============================================
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Sleep utility for retry delays
- */
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Retry wrapper with exponential backoff
- */
-async function retryWithBackoff(fn, maxRetries = OPENAI_CONFIG.maxRetries) {
-  let lastError;
-  
+const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`🔄 Attempt ${attempt + 1}/${maxRetries + 1}`);
       return await fn();
     } catch (error) {
-      lastError = error;
-      console.error(`❌ Attempt ${attempt + 1} failed:`, error.message);
-      
-      // Don't retry on authentication errors
-      if (error.status === 401 || error.status === 403) {
-        console.error('❌ Authentication error - not retrying');
-        throw error;
-      }
-      
-      // Don't retry if it's the last attempt
-      if (attempt < maxRetries) {
-        const delayMs = Math.min(1000 * Math.pow(2, attempt), 5000);
-        console.log(`⏳ Waiting ${delayMs}ms before retry...`);
-        await sleep(delayMs);
-      }
+      if (attempt === maxRetries) throw error;
+
+      const isRetryable =
+        error.status === 429 || error.status === 503 || error.status === 502;
+      if (!isRetryable) throw error;
+
+      const delay = baseDelay * Math.pow(2, attempt);
+      console.warn(`LLM request failed (attempt ${attempt + 1}), retrying in ${delay}ms...`);
+      await sleep(delay);
     }
   }
-  
-  throw lastError;
-}
+};
 
 // ============================================
-// PUBLIC API FUNCTIONS
+// COMPLEXITY ROUTER
 // ============================================
+const routeModel = (message) => {
+  const wordCount = message.split(' ').length;
+  const isComplex =
+    wordCount > 50 ||
+    /\b(explain|analyze|compare|summarize|write|create|code|debug|implement)\b/i.test(message);
 
-/**
- * Stream chat completion with retry and timeout
- */
-export async function streamChatCompletion(messages, onChunk) {
-  console.log('📥 streamChatCompletion called');
-  console.log('  - Messages count:', messages.length);
-  console.log('  - Last message:', messages[messages.length - 1]?.content?.substring(0, 100));
+  return isComplex ? MODELS.powerful : MODELS.fast;
+};
 
-  if (!openai) {
-    console.error('❌ OpenAI client not initialized');
-    throw new Error('OpenAI service unavailable');
-  }
+// ============================================
+// STREAMING CHAT COMPLETION
+// ============================================
+export const streamChatCompletion = async (messages, res, model = null) => {
+  const selectedModel = model || routeModel(messages[messages.length - 1]?.content || '');
 
   try {
-    const result = await retryWithBackoff(async () => {
-      console.log('🚀 Calling OpenAI API...');
-      const startTime = Date.now();
-      
-      const stream = await openai.chat.completions.create({
-        model: OPENAI_CONFIG.defaultModel,
-        messages: messages,
-        max_tokens: 2000,
-        temperature: 0.7,
+    const stream = await retryWithBackoff(() =>
+      client.chat.completions.create({
+        model: selectedModel,
+        messages,
+        max_tokens: MAX_TOKENS,
         stream: true,
-      });
-
-      console.log('✅ OpenAI stream created successfully');
-      console.log('  - Time to first byte:', Date.now() - startTime, 'ms');
-
-      let fullResponse = '';
-      let chunkCount = 0;
-
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) {
-          fullResponse += content;
-          chunkCount++;
-          if (onChunk) {
-            onChunk(content);
-          }
-        }
-      }
-
-      console.log('✅ Stream completed successfully');
-      console.log('  - Total chunks:', chunkCount);
-      console.log('  - Response length:', fullResponse.length);
-      console.log('  - Total time:', Date.now() - startTime, 'ms');
-
-      return fullResponse;
-    });
-
-    return result;
-  } catch (error) {
-    console.error('❌ streamChatCompletion error:', error.message);
-    console.error('  - Error type:', error.constructor.name);
-    console.error('  - Error code:', error.code);
-    console.error('  - Error status:', error.status);
-    
-    // Throw user-friendly error
-    if (error.status === 401) {
-      throw new Error('Invalid OpenAI API key. Please check configuration.');
-    } else if (error.status === 429) {
-      throw new Error('OpenAI rate limit exceeded. Please try again later.');
-    } else if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
-      throw new Error('OpenAI request timeout. Please try again.');
-    } else {
-      throw new Error(`AI service error: ${error.message}`);
-    }
-  }
-}
-
-/**
- * Create chat completion (non-streaming) with retry and timeout
- */
-export async function createChatCompletion(messages) {
-  console.log('📥 createChatCompletion called');
-  console.log('  - Messages count:', messages.length);
-
-  if (!openai) {
-    console.error('❌ OpenAI client not initialized');
-    throw new Error('OpenAI service unavailable');
-  }
-
-  try {
-    const result = await retryWithBackoff(async () => {
-      console.log('🚀 Calling OpenAI API (non-streaming)...');
-      const startTime = Date.now();
-      
-      const completion = await openai.chat.completions.create({
-        model: OPENAI_CONFIG.defaultModel,
-        messages: messages,
-        max_tokens: 2000,
         temperature: 0.7,
-      });
+      })
+    );
 
-      console.log('✅ OpenAI completion successful');
-      console.log('  - Response time:', Date.now() - startTime, 'ms');
-      console.log('  - Model used:', completion.model);
-      console.log('  - Tokens used:', completion.usage?.total_tokens);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
 
-      return {
-        content: completion.choices[0].message.content,
-        model: completion.model,
-        usage: completion.usage,
-      };
-    });
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      }
+    }
 
-    return result;
+    res.write('data: [DONE]\n\n');
+    res.end();
   } catch (error) {
-    console.error('❌ createChatCompletion error:', error.message);
-    console.error('  - Error type:', error.constructor.name);
-    console.error('  - Error code:', error.code);
-    console.error('  - Error status:', error.status);
-    
-    // Throw user-friendly error
-    if (error.status === 401) {
-      throw new Error('Invalid OpenAI API key. Please check configuration.');
-    } else if (error.status === 429) {
-      throw new Error('OpenAI rate limit exceeded. Please try again later.');
-    } else if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
-      throw new Error('OpenAI request timeout. Please try again.');
+    console.error('Streaming error:', error.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Streaming failed', message: error.message });
     } else {
-      throw new Error(`AI service error: ${error.message}`);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+      res.end();
     }
   }
-}
+};
 
-/**
- * Create embedding with retry and timeout
- */
-export async function createEmbedding(text) {
-  console.log('📥 createEmbedding called');
-  console.log('  - Text length:', text.length);
+// ============================================
+// NON-STREAMING CHAT COMPLETION
+// ============================================
+export const createChatCompletion = async (messages, model = null) => {
+  const selectedModel = model || routeModel(messages[messages.length - 1]?.content || '');
 
-  if (!openai) {
-    console.error('❌ OpenAI client not initialized');
-    throw new Error('OpenAI service unavailable');
+  return retryWithBackoff(() =>
+    client.chat.completions.create({
+      model: selectedModel,
+      messages,
+      max_tokens: MAX_TOKENS,
+      temperature: 0.7,
+    })
+  );
+};
+
+// ============================================
+// EMBEDDING (only available on OpenAI, skip on Groq)
+// ============================================
+export const createEmbedding = async (text) => {
+  if (useGroq) {
+    // Groq doesn't support embeddings - return null gracefully
+    console.warn('Embeddings not supported with Groq. Skipping.');
+    return null;
   }
 
-  try {
-    const result = await retryWithBackoff(async () => {
-      console.log('🚀 Calling OpenAI Embeddings API...');
-      const startTime = Date.now();
-      
-      const response = await openai.embeddings.create({
-        model: 'text-embedding-ada-002',
-        input: text,
-      });
+  return retryWithBackoff(() =>
+    client.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: text,
+    })
+  );
+};
 
-      console.log('✅ Embedding created successfully');
-      console.log('  - Response time:', Date.now() - startTime, 'ms');
-
-      return response.data[0].embedding;
-    });
-
-    return result;
-  } catch (error) {
-    console.error('❌ createEmbedding error:', error.message);
-    throw error;
-  }
-}
+export { client, MODELS, routeModel };
