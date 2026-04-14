@@ -81,10 +81,14 @@ router.post('/', protect, async (req, res) => {
     res.setHeader('Transfer-Encoding', 'chunked');
     res.setHeader('X-Accel-Buffering', 'no');
 
+    // Sanitize messages for LLM API — Groq/OpenAI only accept {role, content}
+    // Mongoose subdocuments include extra fields (_id, timestamp) that cause 400 errors
+    const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
+
     // Stream response - streamChatCompletion accepts (messages, onChunk, model)
     let fullResponse = '';
     await streamChatCompletion(
-      chat.messages,
+      apiMessages,
       (chunk) => {
         fullResponse += chunk;
         res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
@@ -118,6 +122,9 @@ router.post('/', protect, async (req, res) => {
     console.log('User:', req.user?.email || 'Unknown');
     console.log('Error Message:', error?.message || 'Unknown error');
     console.log('Error Name:', error?.name || 'N/A');
+    console.log('Error Status:', error?.status || error?.response?.status || 'N/A');
+    console.log('Error Code:', error?.code || 'N/A');
+    console.log('Full Error:', JSON.stringify(error, Object.getOwnPropertyNames(error)).slice(0, 1000));
     console.log('=======================\n');
 
     logger.logApiError(error, {
@@ -144,7 +151,18 @@ router.post('/', protect, async (req, res) => {
       });
     }
 
-    // API error formats
+    // OpenAI SDK v4 error format (error.status directly on the error object)
+    if (error?.status) {
+      return res.status(error.status).json({
+        error: 'AI provider error',
+        providerStatus: error.status,
+        providerMessage: error.message || null,
+        providerCode: error.code || null,
+        providerType: error.type || null,
+      });
+    }
+
+    // Legacy SDK v3 error format (error.response.status)
     if (error?.response?.status) {
       const status = error.response.status;
       const data = error.response.data || {};
@@ -156,9 +174,10 @@ router.post('/', protect, async (req, res) => {
       });
     }
 
-    // Fallback internal error
+    // Fallback internal error — include message for debugging
     res.status(500).json({
       error: 'Failed to process chat request',
+      detail: error?.message || 'Unknown error',
     });
   }
 });
@@ -271,8 +290,11 @@ router.post('/complete', protect, async (req, res) => {
     });
     await chat.save();
 
+    // Sanitize messages for LLM API — only {role, content} allowed
+    const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
+
     // Get full response - createChatCompletion returns a completion object
-    const completion = await createChatCompletion(chat.messages);
+    const completion = await createChatCompletion(apiMessages);
     const responseContent = completion.choices[0].message.content;
 
     chat.messages.push({
