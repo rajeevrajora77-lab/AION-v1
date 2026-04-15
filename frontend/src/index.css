@@ -8,6 +8,19 @@
   box-sizing: border-box;
 }
 
+/* Prevent horizontal scroll on all mobile screens */
+html, body, #root {
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100vw;
+}
+
+/* iOS Safari 100vh bug fix — use dvh with fallback */
+.full-screen {
+  height: 100vh;
+  height: 100dvh;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
