@@ -16,12 +16,13 @@ function Chat() {
   const [sessionId, setSessionId] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
-  // New States for Advanced Features
+  // Advanced Features
   const [mode, setMode] = useState('chat');
   const [fileIds, setFileIds] = useState([]);
   const [showAPIKeys, setShowAPIKeys] = useState(false);
   
   const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -35,6 +36,10 @@ function Chat() {
     const userMessage = input.trim();
     setInput('');
     
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'; // from mobile design
+    }
+
     const newMessages = [...messages, { role: 'user', content: userMessage }];
     setMessages(newMessages);
     setIsStreaming(true);
@@ -57,12 +62,12 @@ function Chat() {
           setMessages(prev => {
             const updated = [...prev];
             if (isFirstChunk) {
-              updated.push({ role: 'assistant', content: type === 'step' ? `> ${stepChunk}\\n\\n` : textChunk });
+              updated.push({ role: 'assistant', content: type === 'step' ? `> ${stepChunk}\n\n` : textChunk });
               isFirstChunk = false;
             } else {
               const last = updated[updated.length - 1];
               if (type === 'step') {
-                last.content += `\\n> ${stepChunk}\\n\\n`;
+                last.content += `\n> ${stepChunk}\n\n`;
               } else {
                 last.content += textChunk;
               }
@@ -70,14 +75,19 @@ function Chat() {
             return updated;
           });
         },
-        () => setIsStreaming(false) // onDone
+        () => {
+           setIsStreaming(false);
+        }
       );
     } catch (err) {
       console.error('Streaming error:', err);
       setError(err.message || 'Stream failed. Is Python backend running?');
-    } finally {
       setIsStreaming(false);
     }
+  };
+
+  const handleStopStream = () => {
+    setIsStreaming(false); 
   };
 
   const handleNewChat = () => {
@@ -87,11 +97,18 @@ function Chat() {
     setFileIds([]);
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage(e);
+    }
+  };
+
   return (
     <div className="bg-[#0f0f0f] text-white h-screen flex overflow-hidden">
       {showAPIKeys && <APIKeyManager onClose={() => setShowAPIKeys(false)} />}
       
-      <aside className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-[#171717] border-r border-[#262626] flex flex-col transition-all duration-300`}>
+      <aside className={`hidden md:flex ${sidebarCollapsed ? 'w-16' : 'w-72'} bg-[#171717] border-r border-[#262626] flex-col transition-all duration-300 flex-shrink-0`}>
         <div className="p-4 flex items-center justify-between">
           {!sidebarCollapsed && <div className="text-xl font-bold tracking-wide">AION</div>}
           <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="text-gray-400 hover:text-white text-sm">
@@ -121,17 +138,56 @@ function Chat() {
         )}
       </aside>
 
-      <main className="flex-1 flex flex-col pt-1">
-        <ModeSelector activeMode={mode} onChange={setMode} />
-        
-        <header className="h-10 border-b border-[#262626] flex items-center px-6 justify-between text-xs text-gray-500">
-          <div>AION Mode: <span className="font-semibold text-gray-300 capitalize">{mode}</span></div>
-          <div>{sessionId ? `${String(sessionId).slice(0, 8)}...` : 'New Session'}</div>
+      <main className="flex-1 flex flex-col h-full overflow-hidden">
+        {/* Desktop-only top bar */}
+        <header className="hidden md:flex h-14 border-b border-[#262626] items-center px-6 justify-between flex-shrink-0">
+          <div className="font-medium text-sm flex items-center gap-3">
+             <span className="text-gray-500">AION Mode:</span> 
+             <span className="font-semibold text-gray-300 capitalize">{mode}</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-xs text-gray-500">
+              {sessionId ? `${String(sessionId).slice(0, 8)}...` : 'New Session'}
+            </span>
+            <button 
+              onClick={() => setShowAPIKeys(true)}
+              className="md:hidden text-gray-400 hover:text-white border px-3 py-1.5 rounded-lg border-gray-700"
+            >
+              Settings
+            </button>
+            <button
+              onClick={handleNewChat}
+              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-colors touch-manipulation min-h-[44px]"
+            >
+              + New Chat
+            </button>
+          </div>
         </header>
 
-        <section className="flex-1 overflow-y-auto px-6 py-6 space-y-2">
+        {/* Mobile-only sub-header */}
+        <div className="md:hidden flex items-center justify-between px-4 py-2 border-b border-[#262626] flex-shrink-0">
+          <span className="text-xs text-gray-500">
+            {sessionId ? `Session: ${String(sessionId).slice(0, 8)}...` : 'New Session'}
+          </span>
+           <button 
+              onClick={() => setShowAPIKeys(true)}
+              className="text-xs text-gray-400 hover:text-white border border-gray-700 px-3 py-1.5 rounded-lg touch-manipulation min-h-[44px]"
+            >
+              Key Settings
+            </button>
+          <button
+            onClick={handleNewChat}
+            className="text-xs text-gray-400 hover:text-white border border-gray-700 px-3 py-1.5 rounded-lg touch-manipulation min-h-[44px]"
+          >
+            + New
+          </button>
+        </div>
+
+        <ModeSelector activeMode={mode} onChange={setMode} />
+
+        <section className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 md:px-6 md:py-6 space-y-4 scroll-smooth">
           {messages.length === 0 ? (
-            <p className="text-center text-gray-500 mt-40">Start a conversation in {mode} mode...</p>
+            <p className="text-center text-gray-500 mt-24 text-sm">Start a conversation in {mode} mode...</p>
           ) : (
             messages.map((msg, idx) => (
               <MessageBubble key={idx} message={msg} />
@@ -141,12 +197,12 @@ function Chat() {
         </section>
 
         {error && (
-          <div className="px-6 py-3 bg-red-900/20 border-t border-red-900/50 text-red-400 text-sm">
+          <div className="flex-shrink-0 px-4 py-3 bg-red-900/20 border-t border-red-900/50 text-red-400 text-xs md:text-sm">
             Error: {error}
           </div>
         )}
 
-        <footer className="border-t border-[#262626] p-4">
+        <footer className="flex-shrink-0 border-t border-[#262626] bg-[#0f0f0f] px-3 py-3 md:px-6 md:py-4 pb-safe-bottom">
           <FileUpload 
             conversationId={sessionId || 'new'} 
             onFileUploaded={(file, removedId) => {
@@ -159,15 +215,21 @@ function Chat() {
           />
           <form
             onSubmit={handleSendMessage}
-            className="max-w-4xl mx-auto flex items-center gap-3 bg-[#171717] border border-[#262626] rounded-2xl px-4 mt-2 py-3"
+            className="max-w-4xl mx-auto flex items-end gap-2 mt-2"
           >
-            <input
-              type="text"
+            <textarea
+              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={`Message AION in ${mode} mode...`}
+              onKeyDown={handleKeyDown}
+              onInput={(e) => {
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px';
+              }}
+              placeholder={`Message AION in ${mode} mode... (Shift+Enter for newline)`}
               disabled={isStreaming}
-              className="flex-1 bg-transparent outline-none text-sm placeholder-gray-500"
+              rows={1}
+              className="flex-1 min-h-[44px] max-h-32 resize-none bg-[#171717] text-white rounded-xl px-4 py-3 text-base border border-[#262626] focus:border-blue-500 focus:outline-none placeholder-gray-500 leading-relaxed overscroll-contain"
             />
             
             <VoiceRecorder 
@@ -178,20 +240,27 @@ function Chat() {
             />
 
             {isStreaming ? (
-              <button type="button" disabled className="bg-gray-600 text-white px-4 py-1.5 rounded-xl text-sm font-medium">
-                Wait
+              <button
+                type="button"
+                onClick={handleStopStream}
+                className="flex-shrink-0 min-w-[44px] min-h-[44px] px-4 rounded-xl bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-sm font-medium touch-manipulation transition-colors"
+              >
+                Stop
               </button>
             ) : (
               <button
                 type="submit"
                 disabled={!input.trim()}
-                className="bg-white text-black px-4 py-1.5 rounded-xl text-sm font-medium hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-shrink-0 w-11 h-11 rounded-xl bg-white hover:bg-gray-200 active:bg-gray-300 flex items-center justify-center touch-manipulation transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                aria-label="Send message"
               >
-                Send
+                <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                </svg>
               </button>
             )}
           </form>
-          <p className="text-xs text-center text-gray-500 mt-2">AION can make mistakes. Check important info.</p>
+          <p className="text-xs text-center text-gray-600 mt-2">AION can make mistakes. Check important info.</p>
         </footer>
       </main>
     </div>

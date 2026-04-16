@@ -1,3 +1,5 @@
+import logger from './logger.js';
+
 export class CircuitBreaker {
   constructor(failureThreshold = 5, resetTime = 30000) {
     this.failureThreshold = failureThreshold;
@@ -10,7 +12,7 @@ export class CircuitBreaker {
   async exec(fn) {
     if (this.state === 'OPEN') {
       if (Date.now() - this.lastFailureTime > this.resetTime) {
-        console.log('Circuit breaker transitioning to HALF state');
+        logger.info('Circuit breaker transitioning to HALF state');
         this.state = 'HALF';
       } else {
         throw new Error('Circuit breaker is OPEN - service unavailable');
@@ -25,12 +27,21 @@ export class CircuitBreaker {
     } catch (err) {
       this.failures++;
       this.lastFailureTime = Date.now();
-      console.error(`Circuit breaker failure count: ${this.failures}`);
-      
+
+      logger.error('Circuit breaker recorded failure', {
+        count: this.failures,
+        threshold: this.failureThreshold,
+        state: this.state,
+        error: err.message,
+      });
+
       if (this.failures >= this.failureThreshold) {
         this.state = 'OPEN';
-        console.error('Circuit breaker opened after threshold reached');
+        logger.error('Circuit breaker OPENED — LLM service suspended', {
+          resetAt: new Date(Date.now() + this.resetTime).toISOString(),
+        });
       }
+
       throw err;
     }
   }
