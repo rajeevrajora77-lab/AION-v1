@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAuthStore } from '../store/authStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
@@ -26,7 +28,6 @@ function Chat() {
     const userMessage = input.trim();
     setInput('');
 
-    // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -35,7 +36,6 @@ function Chat() {
     setIsStreaming(true);
 
     abortControllerRef.current = new AbortController();
-    // 30s timeout for slow mobile connections
     const mobileTimeout = setTimeout(() => abortControllerRef.current?.abort(), 30000);
 
     const token = useAuthStore.getState().token;
@@ -171,7 +171,7 @@ function Chat() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-[#0f0f0f] text-white">
-      {/* Desktop-only top bar (mobile top bar is in Dashboard.jsx) */}
+      {/* Desktop-only top bar */}
       <header className="hidden md:flex h-14 border-b border-[#262626] items-center px-6 justify-between flex-shrink-0">
         <div className="font-medium text-sm">AION Assistant</div>
         <div className="flex items-center gap-4">
@@ -219,7 +219,15 @@ function Chat() {
                     : 'bg-[#1a1a1a] border border-[#262626] text-gray-100 rounded-tl-sm',
                 ].join(' ')}
               >
-                {msg.content}
+                {msg.role === 'assistant' ? (
+                  <div className="prose prose-invert max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  msg.content
+                )}
               </div>
             </div>
           ))
@@ -234,7 +242,7 @@ function Chat() {
         </div>
       )}
 
-      {/* Input bar — anchored at bottom, above mobile keyboard */}
+      {/* Input bar */}
       <footer className="flex-shrink-0 border-t border-[#262626] bg-[#0f0f0f] px-3 py-3 md:px-6 md:py-4 pb-safe-bottom">
         <form
           onSubmit={handleSendMessage}

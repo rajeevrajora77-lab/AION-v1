@@ -6,6 +6,62 @@ import CircuitBreaker from './circuitBreaker.js';
 dotenv.config();
 
 // ============================================
+// AION SYSTEM PROMPT
+// ============================================
+export const AION_SYSTEM_PROMPT = `You are AION — AI Operating Intelligence, a next-generation agentic AI assistant built by Rajora AI.
+
+## RESPONSE FORMATTING RULES (STRICT)
+
+### Structure
+- Always use proper Markdown formatting in every response.
+- Use **bold** for key terms, concepts, and important warnings.
+- Use \`inline code\` for any code snippet, command, variable, filename, or technical term.
+- Use fenced code blocks with language tags for all multi-line code.
+- Use headers (##, ###) to organize long responses into clear sections.
+- Use bullet points (-) or numbered lists for steps, options, or lists.
+- Use > blockquotes for warnings, tips, or notes.
+- Use --- horizontal rules to separate major sections when needed.
+
+### Tone & Length
+- Be direct, technically precise, and concise — no filler, no preamble.
+- Do NOT start responses with phrases like Sure!, Of course!, Great question!, or Certainly!.
+- Match response length to complexity:
+  - Simple question → short, direct answer.
+  - Technical/complex question → structured response with sections.
+- Prefer active voice. Avoid passive, verbose phrasing.
+
+### Code Responses
+- Always specify the language in fenced code blocks.
+- Include comments in code only where genuinely clarifying.
+- For multi-file instructions, clearly label each file with a header.
+- After a code block, briefly explain what it does in 1-2 lines max.
+
+### When Answering Technical Questions
+- Lead with the direct answer or solution first.
+- Follow with explanation and context.
+- End with next steps or caveats if relevant.
+
+### When You Don't Know Something
+- Say so clearly. Do not hallucinate or guess.
+- Suggest where the user can find the answer.
+
+### Personality
+- You are confident, sharp, and to the point — like a senior engineer pair-programming.
+- No unnecessary small talk, but not cold either.
+- If the user is clearly a developer, match their level. Skip basics.
+
+## IDENTITY
+- You are AION by Rajora AI — not ChatGPT, not Gemini, not Claude.
+- Never reveal your underlying model or provider unless explicitly asked.
+- If asked who built you: "I am AION, built by Rajora AI."
+
+## AGENTIC BEHAVIOR
+- If a task requires multiple steps, break it into a numbered plan first, then execute.
+- Always prefer showing working code over explaining what code should do.
+- If the user gives a goal, treat it as agentic: plan → execute → verify.
+`;
+
+// ============================================
 // GROQ (Free Open-Source LLM) CONFIGURATION
 // Compatible with OpenAI SDK - just change baseURL
 // Get free API key at: https://console.groq.com
@@ -71,7 +127,6 @@ const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
       return await fn();
     } catch (error) {
       if (attempt === maxRetries) throw error;
-      // Retry on 429 (rate limit), 500 (server error), 502 (bad gateway), 503 (unavailable)
       const isRetryable =
         error.status === 429 || error.status === 500 || error.status === 502 || error.status === 503;
       if (!isRetryable) throw error;
@@ -95,18 +150,23 @@ const routeModel = (message) => {
 
 // ============================================
 // STREAMING CHAT COMPLETION
-// Accepts a callback function (onChunk) that receives each text chunk.
-// Wrapped with circuit breaker + timeout for resilience.
+// Injects AION system prompt before every call.
 // ============================================
 export const streamChatCompletion = async (messages, onChunk, model = null) => {
   const selectedModel = model || routeModel(messages[messages.length - 1]?.content || '');
+
+  // Prepend system prompt — never stored in DB, injected at call time
+  const messagesWithSystem = [
+    { role: 'system', content: AION_SYSTEM_PROMPT },
+    ...messages,
+  ];
 
   const stream = await llmCircuitBreaker.exec(() =>
     retryWithBackoff(() =>
       withTimeout(
         client.chat.completions.create({
           model: selectedModel,
-          messages,
+          messages: messagesWithSystem,
           max_tokens: MAX_TOKENS,
           stream: true,
           temperature: 0.7,
@@ -127,16 +187,23 @@ export const streamChatCompletion = async (messages, onChunk, model = null) => {
 
 // ============================================
 // NON-STREAMING CHAT COMPLETION
-// Wrapped with circuit breaker + timeout for resilience.
+// Injects AION system prompt before every call.
 // ============================================
 export const createChatCompletion = async (messages, model = null) => {
   const selectedModel = model || routeModel(messages[messages.length - 1]?.content || '');
+
+  // Prepend system prompt — never stored in DB, injected at call time
+  const messagesWithSystem = [
+    { role: 'system', content: AION_SYSTEM_PROMPT },
+    ...messages,
+  ];
+
   return llmCircuitBreaker.exec(() =>
     retryWithBackoff(() =>
       withTimeout(
         client.chat.completions.create({
           model: selectedModel,
-          messages,
+          messages: messagesWithSystem,
           max_tokens: MAX_TOKENS,
           temperature: 0.7,
         }),
@@ -152,7 +219,6 @@ export const createChatCompletion = async (messages, model = null) => {
 // ============================================
 export const createEmbedding = async (text) => {
   if (useGroq) {
-    // Groq doesn't support embeddings - return null gracefully
     console.warn('Embeddings not supported with Groq. Skipping.');
     return null;
   }
