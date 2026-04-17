@@ -1,0 +1,36 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 0' # Weekly on Sunday
+
+permissions:
+  contents: read
+
+jobs:
+  node-security-audit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [backend, frontend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies (ci)
+        working-directory: ${{ matrix.project }}
+        run: npm ci
+
+      - name: Run npm audit (fail on high)
+        working-directory: ${{ matrix.project }}
+        run: npm audit --omit=dev --audit-level=high

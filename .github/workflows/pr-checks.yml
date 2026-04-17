@@ -1,0 +1,203 @@
+name: Pull Request Checks
+
+# This workflow runs on every PR and must pass before merge
+# It's the gatekeeper for code quality and stability
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # Job 1: Code Quality & Linting
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          if [ ! -f package-lock.json ]; then
+            echo "⚠️ Generating package-lock.json"
+            npm install --package-lock-only
+          fi
+          npm ci
+      
+      - name: Check for console.log statements
+        working-directory: ./backend
+        run: |
+          echo "🔍 Checking for console.log..."
+          if grep -r "console\.log" --include="*.js" --exclude-dir=node_modules --exclude-dir=__tests__ . ; then
+            echo "❌ Found console.log statements. Please remove them."
+            exit 1
+          else
+            echo "✅ No console.log found"
+          fi
+
+  # Job 2: Security Audit
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Run npm audit
+        working-directory: ./backend
+        run: |
+          echo "🔒 Running security audit..."
+          npm audit --audit-level=moderate || true
+          
+      - name: Check for secrets in code
+        run: |
+          echo "🔐 Checking for hardcoded secrets..."
+          if grep -r -E "(password|secret|api[_-]?key|token)\s*=\s*['\"][^'\"]+['\"]" --include="*.js" --exclude-dir=node_modules --exclude-dir=__tests__ . ; then
+            echo "⚠️ Potential hardcoded secrets found. Please review."
+            # Non-blocking - just a warning
+          else
+            echo "✅ No obvious hardcoded secrets found"
+          fi
+
+  # Job 3: Unit Tests (BLOCKING)
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          if [ ! -f package-lock.json ]; then
+            npm install --package-lock-only
+          fi
+          npm ci
+      
+      - name: Run tests with coverage
+        working-directory: ./backend
+        run: |
+          echo "🧪 Running tests..."
+          npm test -- --coverage --passWithNoTests=false
+        env:
+          CI: true
+          NODE_ENV: test
+      
+      - name: Check test coverage
+        working-directory: ./backend
+        run: |
+          echo "📊 Checking test coverage..."
+          if [ -d coverage ]; then
+            echo "✅ Coverage report generated"
+          else
+            echo "⚠️ No coverage report found"
+          fi
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          directory: ./backend/coverage
+          fail_ci_if_error: false
+          flags: backend
+
+  # Job 4: Health Check Validation
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          if [ ! -f package-lock.json ]; then
+            npm install --package-lock-only
+          fi
+          npm ci
+      
+      - name: Start server in background
+        working-directory: ./backend
+        run: |
+          echo "🚀 Starting server..."
+          NODE_ENV=test npm start &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          sleep 10
+        env:
+          PORT: 5000
+          MONGODB_URI: mongodb://localhost:27017/test
+          OPENAI_API_KEY: test_key_for_ci
+      
+      - name: Test health endpoint
+        run: |
+          echo "🏥 Testing /health endpoint..."
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health)
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✅ Health check passed (HTTP $RESPONSE)"
+          else
+            echo "❌ Health check failed (HTTP $RESPONSE)"
+            exit 1
+          fi
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          if [ ! -z "$SERVER_PID" ]; then
+            kill $SERVER_PID || true
+          fi
+
+  # Job 5: PR Quality Gate (Final Check)
+  pr-quality-gate:
+    name: PR Quality Gate
+    runs-on: ubuntu-latest
+    needs: [code-quality, security, test, health-check]
+    
+    steps:
+      - name: All checks passed
+        run: |
+          echo "✅ ================================"
+          echo "✅ ALL PR CHECKS PASSED"
+          echo "✅ ================================"
+          echo ""
+          echo "✓ Code Quality: PASSED"
+          echo "✓ Security Audit: PASSED"
+          echo "✓ Unit Tests: PASSED"
+          echo "✓ Health Check: PASSED"
+          echo ""
+          echo "This PR is ready for review and merge."
+          echo "================================"

@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  aion-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - DATABASE_URL=postgresql://user:password@postgres:5432/aion_v2
+      - REDIS_URL=redis://redis:6379
+      - CHROMA_URL=http://chroma:8000
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - LOG_LEVEL=debug
+      - ENCRYPTION_MASTER_KEY=b2c86b1c5a93e813a44781cf4336c2f309a4d8c6b2df40183ed5c5314e7a89f9
+    networks:
+      - aion-public
+      - aion-internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  aion-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "dist/jobs/JobWorker.js"]
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://user:password@postgres:5432/aion_v2
+      - REDIS_URL=redis://redis:6379
+      - CHROMA_URL=http://chroma:8000
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - LOG_LEVEL=debug
+      - ENCRYPTION_MASTER_KEY=b2c86b1c5a93e813a44781cf4336c2f309a4d8c6b2df40183ed5c5314e7a89f9
+    networks:
+      - aion-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  aion-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    networks:
+      - aion-public
+
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=aion_v2
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - aion-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d aion_v2"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - aion-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chroma:
+    image: chromadb/chroma:latest
+    environment:
+      - IS_PERSISTENT=TRUE
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - aion-internal
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - aion-internal
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    networks:
+      - aion-internal
+
+networks:
+  aion-internal:
+    internal: true
+  aion-public:
+
+volumes:
+  postgres_data:
+  redis_data:
+  chroma_data:
+  minio_data:

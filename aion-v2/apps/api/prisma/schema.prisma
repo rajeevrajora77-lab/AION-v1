@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String           @id @default(uuid())
+  email          String           @unique
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  sessions       Session[]
+  documents      Document[]
+  encryptedKeys  EncryptedKey[]
+}
+
+model Session {
+  id             String           @id @default(uuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id])
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  episodes       AgentEpisode[]
+}
+
+model AgentEpisode {
+  id             String           @id @default(uuid())
+  sessionId      String
+  session        Session          @relation(fields: [sessionId], references: [id])
+  taskId         String
+  stepIndex      Int
+  stepType       String           // 'thought', 'tool_call', 'tool_result', 'synthesize'
+  thought        String?
+  action         String?          
+  toolName       String?
+  toolInput      String?          // JSON
+  toolOutput     String?          // JSON
+  tokensUsed     Int              @default(0)
+  latencyMs      Int              @default(0)
+  error          String?
+  createdAt      DateTime         @default(now())
+}
+
+model Document {
+  id             String           @id @default(uuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id])
+  projectId      String?
+  filename       String
+  status         String           // 'pending', 'processing', 'completed', 'failed'
+  chunkCount     Int              @default(0)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model EncryptedKey {
+  id             String           @id @default(uuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id])
+  provider       String           // 'openai', 'anthropic', 'groq'
+  encryptedValue String           // AES-256-GCM encrypted
+  iv             String
+  authTag        String
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([userId, provider])
+}

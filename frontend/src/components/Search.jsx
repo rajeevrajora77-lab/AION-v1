@@ -17,10 +17,7 @@ function Search() {
     setHasSearched(true);
 
     try {
-      const response = await api.post('/search', {
-        query: query.trim(),
-      });
-
+      const response = await api.post('/search', { query: query.trim() });
       setResults(response.data.results || []);
     } catch (err) {
       console.error('Search error:', err);
@@ -31,197 +28,87 @@ function Search() {
     }
   };
 
-  const openLink = (url) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h2>Search</h2>
-        <p>Web search powered by AION</p>
-      </div>
-
-      {/* Search Form */}
-      <form onSubmit={handleSearch} style={styles.searchForm}>
-        <div style={styles.searchInputGroup}>
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search the web..."
-            disabled={isLoading}
-            style={styles.searchInput}
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !query.trim()}
-            style={{
-              ...styles.searchButton,
-              ...(isLoading || !query.trim() ? styles.buttonDisabled : {}),
-            }}
-          >
-            {isLoading ? 'Searching...' : 'Search'}
-          </button>
+    <div className="flex flex-col h-full overflow-y-auto overscroll-contain bg-gray-950 text-white">
+      <div className="w-full max-w-3xl mx-auto px-4 md:px-6 py-6">
+        {/* Header */}
+        <div className="mb-6 text-center">
+          <h2 className="text-xl md:text-2xl font-bold text-white">Search</h2>
+          <p className="text-gray-400 text-sm mt-1">Web search powered by AION</p>
         </div>
-      </form>
 
-      {/* Error Display */}
-      {error && (
-        <div style={styles.error}>
-          Error: {error}
-        </div>
-      )}
+        {/* Search form */}
+        <form onSubmit={handleSearch} className="mb-6">
+          <div className="flex gap-2 items-stretch">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search the web..."
+              disabled={isLoading}
+              className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-3 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 min-h-[44px]"
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !query.trim()}
+              className="px-5 py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold rounded-xl text-base transition-colors touch-manipulation min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Searching...' : 'Search'}
+            </button>
+          </div>
+        </form>
 
-      {/* Loading State */}
-      {isLoading && (
-        <div style={styles.loading}>
-          <p>Searching...</p>
-        </div>
-      )}
+        {/* Error */}
+        {error && (
+          <div className="mb-4 px-4 py-3 bg-red-900/30 border border-red-800 text-red-400 rounded-xl text-sm">
+            Error: {error}
+          </div>
+        )}
 
-      {/* Results Display */}
-      {!isLoading && hasSearched && results.length === 0 && !error && (
-        <div style={styles.noResults}>
-          <p>No results found for "{query}"</p>
-        </div>
-      )}
+        {/* Loading */}
+        {isLoading && (
+          <div className="text-center py-10 text-gray-400 text-sm">Searching...</div>
+        )}
 
-      {!isLoading && results.length > 0 && (
-        <div style={styles.resultsContainer}>
-          <p style={styles.resultCount}>
-            Found {results.length} result{results.length !== 1 ? 's' : ''}
-          </p>
-          {results.map((result, idx) => (
-            <div key={idx} style={styles.resultItem}>
-              <h3
-                style={styles.resultTitle}
-                onClick={() => openLink(result.url)}
-                role="button"
-                tabIndex="0"
-              >
-                {result.title}
-              </h3>
-              <p style={styles.resultSnippet}>{result.snippet}</p>
-              <p style={styles.resultUrl}>
-                <a
-                  href={result.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={styles.link}
+        {/* No results */}
+        {!isLoading && hasSearched && results.length === 0 && !error && (
+          <div className="text-center py-10 text-gray-500 text-sm">
+            No results found for &ldquo;{query}&rdquo;
+          </div>
+        )}
+
+        {/* Results — 1 col mobile, 2 col tablet+ */}
+        {!isLoading && results.length > 0 && (
+          <div>
+            <p className="text-gray-500 text-xs mb-4">
+              Found {results.length} result{results.length !== 1 ? 's' : ''}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
+              {results.map((result, idx) => (
+                <div
+                  key={idx}
+                  className="bg-gray-800 rounded-xl p-4 border border-gray-700 hover:border-gray-600 transition-colors"
                 >
-                  {result.url}
-                </a>
-              </p>
+                  <a
+                    href={result.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 hover:text-blue-300 font-medium text-sm md:text-base line-clamp-2 block mb-2"
+                  >
+                    {result.title}
+                  </a>
+                  <p className="text-gray-400 text-xs md:text-sm leading-relaxed line-clamp-3 mb-2">
+                    {result.snippet}
+                  </p>
+                  <span className="text-gray-600 text-xs truncate block">{result.link}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    padding: '20px',
-    backgroundColor: '#f9f9f9',
-    minHeight: '100vh',
-    fontFamily: 'Arial, sans-serif',
-  },
-  header: {
-    marginBottom: '30px',
-    textAlign: 'center',
-    borderBottom: '2px solid #007bff',
-    paddingBottom: '15px',
-  },
-  searchForm: {
-    marginBottom: '30px',
-    maxWidth: '600px',
-    margin: '0 auto 30px auto',
-  },
-  searchInputGroup: {
-    display: 'flex',
-    gap: '10px',
-  },
-  searchInput: {
-    flex: 1,
-    padding: '12px',
-    fontSize: '16px',
-    border: '1px solid #ddd',
-    borderRadius: '5px',
-    boxSizing: 'border-box',
-  },
-  searchButton: {
-    padding: '12px 24px',
-    backgroundColor: '#007bff',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    fontSize: '16px',
-  },
-  buttonDisabled: {
-    backgroundColor: '#ccc',
-    color: '#666',
-    cursor: 'not-allowed',
-  },
-  error: {
-    padding: '15px',
-    backgroundColor: '#f8d7da',
-    color: '#721c24',
-    borderRadius: '5px',
-    marginBottom: '20px',
-    border: '1px solid #f5c6cb',
-  },
-  loading: {
-    textAlign: 'center',
-    padding: '40px',
-    color: '#666',
-  },
-  noResults: {
-    textAlign: 'center',
-    padding: '40px',
-    color: '#999',
-    fontSize: '16px',
-  },
-  resultsContainer: {
-    maxWidth: '800px',
-    margin: '0 auto',
-  },
-  resultCount: {
-    color: '#666',
-    marginBottom: '20px',
-    fontSize: '14px',
-  },
-  resultItem: {
-    backgroundColor: 'white',
-    padding: '20px',
-    marginBottom: '15px',
-    borderRadius: '5px',
-    border: '1px solid #e0e0e0',
-  },
-  resultTitle: {
-    color: '#007bff',
-    cursor: 'pointer',
-    margin: '0 0 10px 0',
-    fontSize: '18px',
-  },
-  resultSnippet: {
-    color: '#555',
-    margin: '0 0 10px 0',
-    lineHeight: '1.6',
-    fontSize: '14px',
-  },
-  resultUrl: {
-    color: '#999',
-    margin: '0',
-    fontSize: '12px',
-  },
-  link: {
-    color: '#0066cc',
-    textDecoration: 'none',
-  },
-};
 
 export default Search;
