@@ -6,7 +6,7 @@ import VoiceRecorder from './VoiceRecorder';
 import FileUpload from './FileUpload';
 import APIKeyManager from './APIKeyManager';
 import MessageBubble from './MessageBubble';
-import { chatAPI } from '../services/pythonApi';
+import api from '../services/api';
 
 function Chat() {
   const [messages, setMessages] = useState([]);
@@ -16,13 +16,11 @@ function Chat() {
   const [sessionId, setSessionId] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
-  // Advanced Features
-  const [mode, setMode] = useState('chat');
-  const [fileIds, setFileIds] = useState([]);
   const [showAPIKeys, setShowAPIKeys] = useState(false);
   
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -37,7 +35,7 @@ function Chat() {
     setInput('');
     
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'; // from mobile design
+      textareaRef.current.style.height = 'auto';
     }
 
     const newMessages = [...messages, { role: 'user', content: userMessage }];
@@ -52,49 +50,109 @@ function Chat() {
     }
 
     try {
-      let isFirstChunk = true;
+      abortControllerRef.current = new AbortController();
       
-      await chatAPI.stream(
-        newMessages,
-        mode,
-        fileIds,
-        (textChunk, stepChunk, type) => {
-          setMessages(prev => {
-            const updated = [...prev];
-            if (isFirstChunk) {
-              updated.push({ role: 'assistant', content: type === 'step' ? `> ${stepChunk}\n\n` : textChunk });
-              isFirstChunk = false;
-            } else {
-              const last = updated[updated.length - 1];
-              if (type === 'step') {
-                last.content += `\n> ${stepChunk}\n\n`;
-              } else {
-                last.content += textChunk;
-              }
-            }
-            return updated;
-          });
+      const response = await fetch(api.defaults.baseURL + '/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
-        () => {
-           setIsStreaming(false);
+        body: JSON.stringify({
+          message: userMessage,
+          sessionId: sessionId,
+        }),
+        signal: abortControllerRef.current.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      if (!response.body) {
+        throw new Error('No response body - streaming not supported');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let isFirst = true;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+
+          const data = trimmed.slice(5).trim();
+          if (!data) continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            
+            if (parsed.done) {
+              if (parsed.sessionId) {
+                setSessionId(parsed.sessionId);
+              }
+              break;
+            }
+
+            if (parsed.content) {
+              setMessages(prev => {
+                const updated = [...prev];
+                if (isFirst) {
+                  updated.push({ role: 'assistant', content: parsed.content });
+                  isFirst = false;
+                } else {
+                  const last = updated[updated.length - 1];
+                  if (last.role === 'assistant') {
+                    last.content += parsed.content;
+                  } else {
+                    updated.push({ role: 'assistant', content: parsed.content });
+                  }
+                }
+                return updated;
+              });
+            }
+
+            if (parsed.error) {
+              setError(parsed.error);
+              break;
+            }
+          } catch (parseErr) {
+            console.warn('Failed to parse SSE data:', data, parseErr);
+          }
         }
-      );
+      }
+
+      setIsStreaming(false);
     } catch (err) {
-      console.error('Streaming error:', err);
-      setError(err.message || 'Stream failed. Is Python backend running?');
+      console.error('Chat error:', err);
+      if (err.name !== 'AbortError') {
+        setError(err.message || 'Failed to send message. Please try again.');
+      }
       setIsStreaming(false);
     }
   };
 
   const handleStopStream = () => {
-    setIsStreaming(false); 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setIsStreaming(false);
   };
 
   const handleNewChat = () => {
     setMessages([]);
     setSessionId(null);
     setError(null);
-    setFileIds([]);
   };
 
   const handleKeyDown = (e) => {
@@ -112,25 +170,27 @@ function Chat() {
         <div className="p-4 flex items-center justify-between">
           {!sidebarCollapsed && <div className="text-xl font-bold tracking-wide">AION</div>}
           <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="text-gray-400 hover:text-white text-sm">
-            &#9776;
+            ☰
           </button>
         </div>
+
         {!sidebarCollapsed && (
           <>
             <button onClick={handleNewChat} className="mx-4 mb-4 py-2 rounded-xl bg-[#262626] hover:bg-[#303030] text-sm">
               + New Chat
             </button>
+
             <div className="flex-1 overflow-y-auto px-2 space-y-2">
               <div className="p-2 rounded-lg bg-[#1f1f1f] text-sm truncate">Current Session</div>
             </div>
-            
+
             <button 
               onClick={() => setShowAPIKeys(true)}
               className="m-4 p-2 flex items-center justify-center gap-2 rounded-lg border border-[#262626] hover:bg-[#1f1f1f] text-sm text-gray-400"
             >
               <Settings size={16} /> API Keys / DB Settings
             </button>
-            
+
             <div className="p-4 border-t border-[#262626] text-xs text-gray-400">
               AION v1
             </div>
@@ -142,8 +202,7 @@ function Chat() {
         {/* Desktop-only top bar */}
         <header className="hidden md:flex h-14 border-b border-[#262626] items-center px-6 justify-between flex-shrink-0">
           <div className="font-medium text-sm flex items-center gap-3">
-             <span className="text-gray-500">AION Mode:</span> 
-             <span className="font-semibold text-gray-300 capitalize">{mode}</span>
+            <span className="text-gray-500">AION Chat</span>
           </div>
           <div className="flex items-center gap-4">
             <span className="text-xs text-gray-500">
@@ -169,12 +228,12 @@ function Chat() {
           <span className="text-xs text-gray-500">
             {sessionId ? `Session: ${String(sessionId).slice(0, 8)}...` : 'New Session'}
           </span>
-           <button 
-              onClick={() => setShowAPIKeys(true)}
-              className="text-xs text-gray-400 hover:text-white border border-gray-700 px-3 py-1.5 rounded-lg touch-manipulation min-h-[44px]"
-            >
-              Key Settings
-            </button>
+          <button 
+            onClick={() => setShowAPIKeys(true)}
+            className="text-xs text-gray-400 hover:text-white border border-gray-700 px-3 py-1.5 rounded-lg touch-manipulation min-h-[44px]"
+          >
+            Key Settings
+          </button>
           <button
             onClick={handleNewChat}
             className="text-xs text-gray-400 hover:text-white border border-gray-700 px-3 py-1.5 rounded-lg touch-manipulation min-h-[44px]"
@@ -183,12 +242,10 @@ function Chat() {
           </button>
         </div>
 
-        <ModeSelector activeMode={mode} onChange={setMode} />
-
         <section className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 md:px-6 md:py-6 scroll-smooth">
           <div className="max-w-3xl mx-auto w-full space-y-6 pt-4 pb-8">
             {messages.length === 0 ? (
-              <p className="text-center text-gray-500 mt-24 text-sm">Start a conversation in {mode} mode...</p>
+              <p className="text-center text-gray-500 mt-24 text-sm">Start a conversation with AION...</p>
             ) : (
               messages.map((msg, idx) => (
                 <MessageBubble key={idx} message={msg} />
@@ -205,16 +262,6 @@ function Chat() {
         )}
 
         <footer className="flex-shrink-0 border-t border-[#262626] bg-[#0f0f0f] px-3 py-3 md:px-6 md:py-4 pb-safe-bottom">
-          <FileUpload 
-            conversationId={sessionId || 'new'} 
-            onFileUploaded={(file, removedId) => {
-              if (removedId) {
-                setFileIds(prev => prev.filter(id => id !== removedId));
-              } else if (file) {
-                setFileIds(prev => [...prev, file.id]);
-              }
-            }} 
-          />
           <form
             onSubmit={handleSendMessage}
             className="max-w-3xl mx-auto flex items-end gap-2 mt-2"
@@ -228,12 +275,12 @@ function Chat() {
                 e.target.style.height = 'auto';
                 e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px';
               }}
-              placeholder={`Message AION in ${mode} mode... (Shift+Enter for newline)`}
+              placeholder="Message AION... (Shift+Enter for newline)"
               disabled={isStreaming}
               rows={1}
               className="flex-1 min-h-[44px] max-h-32 resize-none bg-[#171717] text-white rounded-xl px-4 py-3 text-base border border-[#262626] focus:border-blue-500 focus:outline-none placeholder-gray-500 leading-relaxed overscroll-contain"
             />
-            
+
             <VoiceRecorder 
               onTranscript={(text) => {
                 setInput(prev => prev + (prev ? ' ' : '') + text);

@@ -1,7 +1,7 @@
-# Render.com Deployment Configuration for AION v1 Backend
+# Render.com Deployment Configuration for AION v1
 # Docs: https://render.com/docs/blueprint-spec
-
 services:
+  # ── Node.js Backend (Auth, Chat, Search, Voice) ──────────────────────────
   - type: web
     name: aion-backend
     runtime: node
@@ -18,9 +18,53 @@ services:
       # Set these in Render dashboard (do NOT commit real keys):
       - key: GROQ_API_KEY
         sync: false
+      - key: OPENAI_API_KEY
+        sync: false
       - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
         generateValue: true
       - key: MONGODB_URI
         sync: false
+    healthCheckPath: /health
+    autoDeploy: true
+
+  # ── Python FastAPI Backend (Chat Stream, Voice, Upload, Image, Keys) ──────
+  - type: web
+    name: aion-python-backend
+    runtime: python
+    rootDir: backend/python_backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: FRONTEND_URL
+        value: https://chat.rajora.co.in
+      - key: NODE_ENV
+        value: production
+      # Set these in Render dashboard (do NOT commit real keys):
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: STABILITY_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: DATABASE_NAME
+        value: aion_db
+      # ENCRYPTION_KEY: used to encrypt user-stored API keys in MongoDB
+      # Generate: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      - key: ENCRYPTION_KEY
+        generateValue: true
     healthCheckPath: /health
     autoDeploy: true
