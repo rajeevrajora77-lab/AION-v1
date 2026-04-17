@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import api from '../services/api';
+import { normalizeUser } from '../utils/userDisplay';
 
 export const useAuthStore = create(
   persist(
@@ -13,23 +14,49 @@ export const useAuthStore = create(
       login: async (email, password) => {
         const response = await api.post('/auth/login', { email, password });
         const { token, refreshToken, user } = response.data.data;
-        set({ user, token, refreshToken, isAuthenticated: true });
+        set({
+          user: normalizeUser(user),
+          token,
+          refreshToken,
+          isAuthenticated: true,
+        });
         return response.data;
       },
 
-      // Direct auth set — for pages that already have token/user
       setAuth: (token, refreshToken, user) => {
-        set({ token, refreshToken, user, isAuthenticated: true });
+        set({
+          token,
+          refreshToken,
+          user: normalizeUser(user),
+          isAuthenticated: true,
+        });
       },
 
       signup: async (email, password, name) => {
         const response = await api.post('/auth/signup', { email, password, name });
         const { token, refreshToken, user } = response.data.data;
-        set({ user, token, refreshToken, isAuthenticated: true });
+        set({
+          user: normalizeUser(user),
+          token,
+          refreshToken,
+          isAuthenticated: true,
+        });
         return response.data;
       },
 
-      // Silent token refresh using stored refresh token
+      /** Refresh profile from server (call after login and on app load when token exists). */
+      fetchCurrentUser: async () => {
+        const { token } = get();
+        if (!token) return;
+        try {
+          const { data } = await api.get('/auth/me');
+          const payload = data.data;
+          set({ user: normalizeUser(payload) });
+        } catch {
+          get().logout();
+        }
+      },
+
       refreshAccessToken: async () => {
         const { refreshToken } = get();
         if (!refreshToken) return false;
@@ -38,7 +65,6 @@ export const useAuthStore = create(
           set({ token: response.data.data.token });
           return true;
         } catch {
-          // Refresh token is invalid or expired — force full logout
           get().logout();
           return false;
         }
@@ -46,7 +72,6 @@ export const useAuthStore = create(
 
       logout: async () => {
         try {
-          // Notify server (fire-and-forget)
           await api.post('/auth/logout');
         } catch {
           // Ignore server errors — clear client state regardless
@@ -55,7 +80,9 @@ export const useAuthStore = create(
       },
 
       updateUser: (updates) =>
-        set((state) => ({ user: { ...state.user, ...updates } })),
+        set((state) => ({
+          user: normalizeUser({ ...state.user, ...updates }),
+        })),
     }),
     {
       name: 'auth-storage',

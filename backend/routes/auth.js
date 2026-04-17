@@ -7,6 +7,26 @@ import logger from '../utils/logger.js';
 
 const router = express.Router();
 
+/**
+ * Serialize user for API responses — consistent id, name fallback to email prefix.
+ */
+function serializeUser(userDoc) {
+  if (!userDoc) return null;
+  const email = String(userDoc.email || '').toLowerCase().trim();
+  const rawName = userDoc.name != null ? String(userDoc.name).trim() : '';
+  const name = rawName || (email.includes('@') ? email.split('@')[0] : email);
+  return {
+    id: userDoc._id,
+    name,
+    email,
+    role: userDoc.role,
+    lastLogin: userDoc.lastLogin,
+    isActive: userDoc.isActive,
+    createdAt: userDoc.createdAt,
+    preferences: userDoc.preferences,
+  };
+}
+
 // ============================================================================
 // RATE LIMITER
 // ============================================================================
@@ -79,7 +99,7 @@ router.post('/signup', authLimiter, async (req, res) => {
       data: {
         token,
         refreshToken,
-        user: { id: user._id, email: user.email, name: user.name, role: user.role },
+        user: serializeUser(user),
       },
     });
   } catch (error) {
@@ -122,13 +142,7 @@ router.post('/login', authLimiter, async (req, res) => {
       data: {
         token,
         refreshToken,
-        user: {
-          id: user._id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          lastLogin: user.lastLogin,
-        },
+        user: serializeUser(user),
       },
     });
   } catch (error) {
@@ -191,15 +205,7 @@ router.get('/me', protect, async (req, res) => {
     const user = await User.findById(req.user._id);
     res.json({
       success: true,
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isActive: user.isActive,
-        createdAt: user.createdAt,
-        preferences: user.preferences,
-      },
+      data: serializeUser(user),
     });
   } catch (error) {
     logger.logApiError(error, { userId: req.user?._id, route: 'GET /api/auth/me' });
@@ -236,15 +242,7 @@ router.put('/update-profile', protect, async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isActive: user.isActive,
-        createdAt: user.createdAt,
-        preferences: user.preferences,
-      },
+      data: serializeUser(user),
     });
   } catch (error) {
     logger.logApiError(error, { userId: req.user?._id, route: 'PUT /api/auth/update-profile' });

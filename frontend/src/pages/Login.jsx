@@ -17,8 +17,8 @@ const Login = () => {
 
     try {
       const response = await api.post('/auth/login', formData);
-      const { token, user } = response.data.data;
-      setAuth(token, user);
+      const { token, refreshToken, user } = response.data.data;
+      setAuth(token, refreshToken, user);
       navigate('/dashboard');
     } catch (err) {
       const errorMessage = !err.response
