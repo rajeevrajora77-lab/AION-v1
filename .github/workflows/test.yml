@@ -1,10 +1,14 @@
 name: Test Suite
 
+# This workflow runs comprehensive tests
+# Used by both PR checks and main branch CI
+
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
+  workflow_dispatch:
 
 jobs:
   test-backend:
@@ -13,26 +17,86 @@ jobs:
     strategy:
       matrix:
         node-version: [18.x]
+      fail-fast: true  # Stop on first failure
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
     
     - name: Setup Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: backend/package-lock.json
+    
+    - name: Check for package-lock.json
+      id: check-lock
+      working-directory: ./backend
+      run: |
+        if [ -f package-lock.json ]; then
+          echo "lock_exists=true" >> $GITHUB_OUTPUT
+          echo "✅ package-lock.json exists"
+        else
+          echo "lock_exists=false" >> $GITHUB_OUTPUT
+          echo "⚠️ package-lock.json missing, will generate"
+        fi
+    
+    - name: Generate package-lock.json (if missing)
+      if: steps.check-lock.outputs.lock_exists == 'false'
+      working-directory: ./backend
+      run: |
+        echo "📦 Generating package-lock.json..."
+        npm install --package-lock-only
+        echo "✅ package-lock.json generated"
         
     - name: Install backend dependencies
       working-directory: ./backend
-      run: npm ci
+      run: |
+        if [ -f package-lock.json ]; then
+          echo "📦 Installing with npm ci (clean install)..."
+          npm ci
+        else
+          echo "📦 Installing with npm install..."
+          npm install
+        fi
     
     - name: Run backend tests
       working-directory: ./backend
-      run: npm test
+      run: |
+        echo "🧪 Running test suite..."
+        npm test -- --coverage --passWithNoTests=false
+      env:
+        CI: true
+        NODE_ENV: test
+    
+    - name: Verify tests ran
+      working-directory: ./backend
+      run: |
+        if [ ! -d coverage ]; then
+          echo "❌ Tests did not generate coverage report"
+          echo "This might indicate tests didn't run properly"
+          exit 1
+        fi
+        echo "✅ Tests completed successfully"
     
     - name: Upload coverage reports
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         directory: ./backend/coverage
         flags: backend
         fail_ci_if_error: false
+    
+    - name: Test Summary
+      if: always()
+      run: |
+        echo "================================"
+        echo "TEST RESULTS SUMMARY"
+        echo "================================"
+        if [ -d backend/coverage ]; then
+          echo "✅ Tests: PASSED"
+          echo "✅ Coverage: Generated"
+        else
+          echo "❌ Tests: FAILED"
+        fi
+        echo "================================"

@@ -1,10 +1,13 @@
 import express from 'express';
-import { synthesizeText } from '../utils/voice.js';
+import { synthesizeText, processVoiceTranscript } from '../utils/voice.js';
+import { protect } from '../middleware/auth.js';
+import { voiceLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-// POST /api/voice/process - Process voice transcription
-router.post('/process', async (req, res) => {
+// POST /api/voice/process - Process voice transcription via LLM
+// PROTECTED + RATE LIMITED
+router.post('/process', protect, voiceLimiter, async (req, res) => {
   try {
     const { transcript } = req.body;
 
@@ -12,12 +15,10 @@ router.post('/process', async (req, res) => {
       return res.status(400).json({ error: 'Transcript cannot be empty' });
     }
 
-    // Process transcribed text
-    res.json({
-      originalTranscript: transcript,
-      processed: true,
-      timestamp: new Date().toISOString(),
-    });
+    // Process transcript through LLM — returns { reply, originalTranscript, processedAt }
+    const result = await processVoiceTranscript(transcript.trim());
+
+    res.json(result);
   } catch (error) {
     console.error('Voice processing error:', error);
     res.status(500).json({ error: 'Failed to process voice' });
@@ -25,7 +26,8 @@ router.post('/process', async (req, res) => {
 });
 
 // POST /api/voice/synthesize - Text-to-speech endpoint
-router.post('/synthesize', async (req, res) => {
+// PROTECTED + RATE LIMITED
+router.post('/synthesize', protect, voiceLimiter, async (req, res) => {
   try {
     const { text, voice = 'en-US' } = req.body;
 
@@ -36,8 +38,12 @@ router.post('/synthesize', async (req, res) => {
     // Generate audio from text
     const audioData = await synthesizeText(text, voice);
 
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Disposition', 'attachment; filename="speech.mp3"');
+    // Set correct Content-Type based on actual audio format
+    // If using real TTS provider: audio/mpeg
+    // If mock fallback: audio/wav (mock returns WAV header)
+    const isMock = !process.env.GOOGLE_TTS_KEY && !process.env.AZURE_SPEECH_KEY;
+    res.setHeader('Content-Type', isMock ? 'audio/wav' : 'audio/mpeg');
+    res.setHeader('Content-Disposition', `attachment; filename="speech.${isMock ? 'wav' : 'mp3'}"`);
     res.send(audioData);
   } catch (error) {
     console.error('Voice synthesis error:', error);
@@ -46,7 +52,8 @@ router.post('/synthesize', async (req, res) => {
 });
 
 // GET /api/voice/config - Get voice configuration
-router.get('/config', (req, res) => {
+// PROTECTED
+router.get('/config', protect, (req, res) => {
   try {
     const config = {
       supportedLanguages: [
