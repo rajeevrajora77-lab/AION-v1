@@ -8,12 +8,15 @@ import APIKeyManager from './APIKeyManager';
 import MessageBubble from './MessageBubble';
 import api from '../services/api';
 
+const CHAT_SESSION_KEY = 'aion-chat-session-id';
+
 function Chat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [sessions, setSessions] = useState([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   const [showAPIKeys, setShowAPIKeys] = useState(false);
@@ -22,9 +25,60 @@ function Chat() {
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
 
+  const loadSessions = async () => {
+    try {
+      const { data } = await api.get('/chat/sessions');
+      setSessions(Array.isArray(data) ? data : []);
+      return Array.isArray(data) ? data : [];
+    } catch (err) {
+      console.error('Failed to load sessions:', err);
+      return [];
+    }
+  };
+
+  const loadHistory = async (targetSessionId) => {
+    if (!targetSessionId) return false;
+    try {
+      const { data } = await api.get('/chat/history', {
+        params: { sessionId: targetSessionId },
+      });
+      setMessages(Array.isArray(data?.messages) ? data.messages : []);
+      setSessionId(data?.sessionId || targetSessionId);
+      localStorage.setItem(CHAT_SESSION_KEY, String(data?.sessionId || targetSessionId));
+      return true;
+    } catch (err) {
+      console.error('Failed to load history:', err);
+      return false;
+    }
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    const init = async () => {
+      const token = useAuthStore.getState().token;
+      if (!token) return;
+
+      const cachedSessionId = localStorage.getItem(CHAT_SESSION_KEY);
+      if (cachedSessionId) {
+        const loaded = await loadHistory(cachedSessionId);
+        if (loaded) {
+          await loadSessions();
+          return;
+        }
+        localStorage.removeItem(CHAT_SESSION_KEY);
+      }
+
+      const userSessions = await loadSessions();
+      if (userSessions.length > 0) {
+        await loadHistory(userSessions[0].sessionId);
+      }
+    };
+
+    init();
+  }, []);
 
   const handleSendMessage = async (e) => {
     e?.preventDefault();
@@ -100,6 +154,8 @@ function Chat() {
             if (parsed.done) {
               if (parsed.sessionId) {
                 setSessionId(parsed.sessionId);
+                localStorage.setItem(CHAT_SESSION_KEY, String(parsed.sessionId));
+                loadSessions();
               }
               break;
             }
@@ -153,6 +209,7 @@ function Chat() {
     setMessages([]);
     setSessionId(null);
     setError(null);
+    localStorage.removeItem(CHAT_SESSION_KEY);
   };
 
   const handleKeyDown = (e) => {
@@ -181,7 +238,25 @@ function Chat() {
             </button>
 
             <div className="flex-1 overflow-y-auto px-2 space-y-2">
-              <div className="p-2 rounded-lg bg-[#1f1f1f] text-sm truncate">Current Session</div>
+              {sessions.length === 0 ? (
+                <div className="p-2 rounded-lg bg-[#1f1f1f] text-sm truncate">No saved sessions</div>
+              ) : (
+                sessions.map((item) => (
+                  <button
+                    key={item.sessionId}
+                    type="button"
+                    onClick={() => loadHistory(item.sessionId)}
+                    className={`w-full p-2 rounded-lg text-left text-sm truncate border ${
+                      String(sessionId) === String(item.sessionId)
+                        ? 'bg-[#2b2b2b] border-[#3a3a3a]'
+                        : 'bg-[#1f1f1f] border-transparent hover:border-[#303030]'
+                    }`}
+                    title={item.lastMessage || 'Session'}
+                  >
+                    {item.lastMessage || 'Session'}
+                  </button>
+                ))
+              )}
             </div>
 
             <button 
