@@ -185,15 +185,17 @@ function Chat() {
 
         <ModeSelector activeMode={mode} onChange={setMode} />
 
-        <section className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 md:px-6 md:py-6 space-y-4 scroll-smooth">
-          {messages.length === 0 ? (
-            <p className="text-center text-gray-500 mt-24 text-sm">Start a conversation in {mode} mode...</p>
-          ) : (
-            messages.map((msg, idx) => (
-              <MessageBubble key={idx} message={msg} />
-            ))
-          )}
-          <div ref={messagesEndRef} />
+        <section className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 md:px-6 md:py-6 scroll-smooth">
+          <div className="max-w-3xl mx-auto w-full space-y-6 pt-4 pb-8">
+            {messages.length === 0 ? (
+              <p className="text-center text-gray-500 mt-24 text-sm">Start a conversation in {mode} mode...</p>
+            ) : (
+              messages.map((msg, idx) => (
+                <MessageBubble key={idx} message={msg} />
+              ))
+            )}
+            <div ref={messagesEndRef} />
+          </div>
         </section>
 
         {error && (
@@ -215,7 +217,7 @@ function Chat() {
           />
           <form
             onSubmit={handleSendMessage}
-            className="max-w-4xl mx-auto flex items-end gap-2 mt-2"
+            className="max-w-3xl mx-auto flex items-end gap-2 mt-2"
           >
             <textarea
               ref={textareaRef}
