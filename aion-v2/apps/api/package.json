@@ -18,7 +18,7 @@
     "bullmq": "^5.4.1",
     "chromadb": "^1.8.1",
     "dotenv": "^16.4.5",
-    "fastify": "^4.26.1",
+    "fastify": "^5.8.5",
     "ioredis": "^5.3.2",
     "isolated-vm": "^4.7.0",
     "minio": "^7.1.3",
