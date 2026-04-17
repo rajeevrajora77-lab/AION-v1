@@ -1,0 +1,16 @@
+{
+  "name": "aion-v2",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "turbo": "^1.11.0",
+    "typescript": "^5.0.0"
+  }
+}
