@@ -22,7 +22,6 @@ const UserSchema = new mongoose.Schema(
       trim: true,
       validate: {
         validator: function(email) {
-          // Simple, linear-time regex — safe against ReDoS, accepts TLDs >3 chars
           return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
         },
         message: 'Please provide a valid email address',
@@ -32,7 +31,7 @@ const UserSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Please provide a password'],
       minlength: [8, 'Password must be at least 8 characters'],
-      select: false, // Don't return password by default
+      select: false,
     },
     role: {
       type: String,
@@ -47,10 +46,10 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    emailVerificationToken: String,
-    emailVerificationExpires: Date,
-    resetPasswordToken: String,
-    resetPasswordExpires: Date,
+    emailVerificationToken: { type: String, select: false },
+    emailVerificationExpires: { type: Date, select: false },
+    resetPasswordToken: { type: String, select: false },
+    resetPasswordExpires: { type: Date, select: false },
     lastLogin: {
       type: Date,
       default: null,
@@ -58,8 +57,9 @@ const UserSchema = new mongoose.Schema(
     loginAttempts: {
       type: Number,
       default: 0,
+      select: false,
     },
-    lockUntil: Date,
+    lockUntil: { type: Date, select: false },
     preferences: {
       theme: {
         type: String,
@@ -88,14 +88,13 @@ const UserSchema = new mongoose.Schema(
     },
   },
   {
-    timestamps: true, // Adds createdAt and updatedAt
+    timestamps: true,
   }
 );
 
 // ============================================================================
 // INDEXES
 // ============================================================================
-
 UserSchema.index({ email: 1 });
 UserSchema.index({ isActive: 1 });
 UserSchema.index({ createdAt: -1 });
@@ -103,20 +102,13 @@ UserSchema.index({ createdAt: -1 });
 // ============================================================================
 // PRE-SAVE MIDDLEWARE - Hash Password
 // ============================================================================
-
 UserSchema.pre('save', async function (next) {
-  // Only hash password if it's modified
   if (!this.isModified('password')) {
     return next();
   }
-
   try {
-    // Generate salt
-    const salt = await bcrypt.genSalt(10); // OWASP-recommended for web apps (~100ms vs ~300ms at 12)
-    
-    // Hash password
+    const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
-    
     next();
   } catch (error) {
     next(error);
@@ -127,9 +119,6 @@ UserSchema.pre('save', async function (next) {
 // INSTANCE METHODS
 // ============================================================================
 
-/**
- * Compare entered password with hashed password
- */
 UserSchema.methods.comparePassword = async function (enteredPassword) {
   try {
     return await bcrypt.compare(enteredPassword, this.password);
@@ -138,83 +127,59 @@ UserSchema.methods.comparePassword = async function (enteredPassword) {
   }
 };
 
-/**
- * Generate JWT token
- */
 UserSchema.methods.generateAuthToken = function () {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('FATAL: JWT_SECRET environment variable is not set.');
+  }
   const payload = {
     id: this._id,
     email: this.email,
     role: this.role,
   };
-
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('FATAL: JWT_SECRET environment variable is not set. Refusing to sign tokens.');
-  }
   const expiresIn = process.env.JWT_EXPIRE || '7d';
-
   return jwt.sign(payload, secret, {
     expiresIn,
     issuer: 'aion-api',
   });
 };
 
-/**
- * Generate refresh token (longer expiry)
- */
+// FIX: ALWAYS use JWT_REFRESH_SECRET — NO fallback to JWT_SECRET
 UserSchema.methods.generateRefreshToken = function () {
+  const secret = process.env.JWT_REFRESH_SECRET;
+  if (!secret) {
+    throw new Error('FATAL: JWT_REFRESH_SECRET environment variable is not set. It must be separate from JWT_SECRET.');
+  }
   const payload = {
     id: this._id,
     type: 'refresh',
   };
-
-  const secret = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('FATAL: JWT_REFRESH_SECRET/JWT_SECRET environment variable is not set. Refusing to sign refresh tokens.');
-  }
-  const expiresIn = '30d';
-
   return jwt.sign(payload, secret, {
-    expiresIn,
+    expiresIn: '30d',
     issuer: 'aion-api',
   });
 };
 
-/**
- * Check if account is locked
- */
 UserSchema.methods.isLocked = function () {
   return !!(this.lockUntil && this.lockUntil > Date.now());
 };
 
-/**
- * Increment login attempts
- */
 UserSchema.methods.incLoginAttempts = function () {
-  // If we have a previous lock that has expired, restart at 1
   if (this.lockUntil && this.lockUntil < Date.now()) {
     return this.updateOne({
       $set: { loginAttempts: 1 },
       $unset: { lockUntil: 1 },
     });
   }
-
   const updates = { $inc: { loginAttempts: 1 } };
   const maxAttempts = 5;
-  const lockTime = 2 * 60 * 60 * 1000; // 2 hours
-
-  // Lock account after max attempts
+  const lockTime = 2 * 60 * 60 * 1000;
   if (this.loginAttempts + 1 >= maxAttempts && !this.isLocked()) {
     updates.$set = { lockUntil: Date.now() + lockTime };
   }
-
   return this.updateOne(updates);
 };
 
-/**
- * Reset login attempts
- */
 UserSchema.methods.resetLoginAttempts = function () {
   return this.updateOne({
     $set: { loginAttempts: 0 },
@@ -222,74 +187,57 @@ UserSchema.methods.resetLoginAttempts = function () {
   });
 };
 
-/**
- * Sanitize user data for JSON response (remove sensitive fields)
- */
-UserSchema.methods.toJSON = function () {
-  const user = this.toObject();
-  
-  // Remove sensitive fields
-  delete user.password;
-  delete user.emailVerificationToken;
-  delete user.resetPasswordToken;
-  delete user.loginAttempts;
-  delete user.lockUntil;
-  delete user.__v;
-  
-  return user;
-};
+// ============================================================================
+// toJSON - FIX: Use transform pattern to avoid conflict with virtual toJSON
+// ============================================================================
+UserSchema.set('toJSON', {
+  virtuals: true,
+  transform: function (doc, ret) {
+    // NEVER leak sensitive fields
+    delete ret.password;
+    delete ret.emailVerificationToken;
+    delete ret.emailVerificationExpires;
+    delete ret.resetPasswordToken;
+    delete ret.resetPasswordExpires;
+    delete ret.loginAttempts;
+    delete ret.lockUntil;
+    delete ret.__v;
+    return ret;
+  },
+});
+
+UserSchema.set('toObject', { virtuals: true });
 
 // ============================================================================
 // STATIC METHODS
 // ============================================================================
 
-/**
- * Find by credentials (email + password)
- */
 UserSchema.statics.findByCredentials = async function (email, password) {
-  const user = await this.findOne({ email }).select('+password');
-
+  const user = await this.findOne({ email }).select('+password +loginAttempts +lockUntil');
   if (!user) {
     throw new Error('Invalid email or password');
   }
-
-  // Check if account is locked
   if (user.isLocked()) {
     throw new Error('Account is temporarily locked. Please try again later.');
   }
-
-  // Check if account is active
   if (!user.isActive) {
     throw new Error('Account has been deactivated');
   }
-
-  // Compare password
   const isMatch = await user.comparePassword(password);
-
   if (!isMatch) {
-    // Increment login attempts
     await user.incLoginAttempts();
     throw new Error('Invalid email or password');
   }
-
-  // Reset login attempts on successful login
   if (user.loginAttempts > 0) {
     await user.resetLoginAttempts();
   }
-
   return user;
 };
 
-/**
- * Find active users
- */
 UserSchema.statics.findActive = function () {
   return this.find({ isActive: true });
 };
 
-/**
- * Get user stats
- */
 UserSchema.statics.getStats = async function () {
   const [total, active, admins, recentLogins] = await Promise.all([
     this.countDocuments(),
@@ -299,7 +247,6 @@ UserSchema.statics.getStats = async function () {
       lastLogin: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
     }),
   ]);
-
   return {
     total,
     active,
@@ -312,26 +259,17 @@ UserSchema.statics.getStats = async function () {
 // ============================================================================
 // VIRTUAL FIELDS
 // ============================================================================
-
-// Full name (if you want to split first/last name in future)
 UserSchema.virtual('fullName').get(function () {
   return this.name;
 });
 
-// Days since last login
 UserSchema.virtual('daysSinceLogin').get(function () {
   if (!this.lastLogin) return null;
   return Math.floor((Date.now() - this.lastLogin) / (1000 * 60 * 60 * 24));
 });
 
-// Enable virtuals in JSON output
-UserSchema.set('toJSON', { virtuals: true });
-UserSchema.set('toObject', { virtuals: true });
-
 // ============================================================================
 // EXPORT MODEL
 // ============================================================================
-
 const User = mongoose.model('User', UserSchema);
-
 export default User;
