@@ -2,6 +2,51 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
+// Must match backend validatePasswordStrength() in backend/routes/auth.js
+function validatePasswordStrength(password) {
+  if (!password || password.length < 8)
+    return 'Password must be at least 8 characters';
+  if (!/[A-Z]/.test(password))
+    return 'Password must contain at least one uppercase letter';
+  if (!/[a-z]/.test(password))
+    return 'Password must contain at least one lowercase letter';
+  if (!/[0-9]/.test(password))
+    return 'Password must contain at least one number';
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password))
+    return 'Password must contain at least one special character (!@#$%^&* …)';
+  return null;
+}
+
+function PasswordRequirements({ password }) {
+  const rules = [
+    { label: 'At least 8 characters', ok: password.length >= 8 },
+    { label: 'One uppercase letter (A–Z)', ok: /[A-Z]/.test(password) },
+    { label: 'One lowercase letter (a–z)', ok: /[a-z]/.test(password) },
+    { label: 'One number (0–9)', ok: /[0-9]/.test(password) },
+    {
+      label: 'One special character (!@#$%^&*…)',
+      ok: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password),
+    },
+  ];
+
+  if (!password) return null;
+
+  return (
+    <ul className="mt-2 space-y-1">
+      {rules.map(({ label, ok }) => (
+        <li key={label} className={`flex items-center gap-1.5 text-xs ${ok ? 'text-green-400' : 'text-gray-500'}`}>
+          <span className={`inline-block w-3.5 h-3.5 rounded-full text-center leading-none font-bold ${
+            ok ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500'
+          }`}>
+            {ok ? '✓' : '·'}
+          </span>
+          {label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Signup() {
   const [formData, setFormData] = useState({
     name: '',
@@ -10,6 +55,7 @@ function Signup() {
     confirmPassword: '',
   });
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { signup } = useAuthStore();
 
@@ -25,11 +71,15 @@ function Signup() {
       setError('Passwords do not match');
       return;
     }
-    if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters long');
+
+    // Client-side password strength check — mirrors backend rule exactly
+    const pwError = validatePasswordStrength(formData.password);
+    if (pwError) {
+      setError(pwError);
       return;
     }
 
+    setLoading(true);
     try {
       await signup(formData.email, formData.password, formData.name);
       navigate('/dashboard');
@@ -38,6 +88,8 @@ function Signup() {
         ? 'Network Error: Unable to connect to the server. Please check your backend deployment.'
         : err.response?.data?.error || err.response?.data?.message || 'Signup failed. Please try again.';
       setError(errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -65,7 +117,6 @@ function Signup() {
             <label htmlFor="name" className="block text-sm font-medium text-gray-300 mb-1.5">
               Full Name
             </label>
-            {/* text-base prevents iOS Safari auto-zoom (must be ≥16px) */}
             <input
               type="text"
               id="name"
@@ -73,7 +124,8 @@ function Signup() {
               value={formData.name}
               onChange={handleChange}
               placeholder="John Doe"
-              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors"
+              disabled={loading}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors disabled:opacity-60"
             />
           </div>
 
@@ -88,7 +140,8 @@ function Signup() {
               value={formData.email}
               onChange={handleChange}
               placeholder="you@example.com"
-              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors"
+              disabled={loading}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors disabled:opacity-60"
             />
           </div>
 
@@ -103,8 +156,11 @@ function Signup() {
               value={formData.password}
               onChange={handleChange}
               placeholder="••••••••"
-              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors"
+              disabled={loading}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors disabled:opacity-60"
             />
+            {/* Live password strength checklist — shown as soon as user starts typing */}
+            <PasswordRequirements password={formData.password} />
           </div>
 
           <div>
@@ -118,15 +174,17 @@ function Signup() {
               value={formData.confirmPassword}
               onChange={handleChange}
               placeholder="••••••••"
-              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors"
+              disabled={loading}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors disabled:opacity-60"
             />
           </div>
 
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold rounded-xl py-3.5 text-base transition-colors touch-manipulation mt-2"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl py-3.5 text-base transition-colors touch-manipulation mt-2"
           >
-            Create Account
+            {loading ? 'Creating account…' : 'Create Account'}
           </button>
         </form>
 
