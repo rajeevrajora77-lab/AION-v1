@@ -16,18 +16,17 @@ export const planSchema = z.object({
 export type PlanStep = z.infer<typeof planSchema>['steps'][0];
 
 export const planner = {
-  async createPlan(objective: string, context: string): Promise<PlanStep[]> {
+  async createPlan(objective: string, context: string, retryCount = 0): Promise<PlanStep[]> {
     logger.info('Agent Planner generating plan', { objective });
-    
     let activeToolsList = getActiveTools().map(t => `${t.name}: ${t.description}`).join(' | ');
 
     const prompt = `You are a Deterministic Agent Planner. 
 Break this objective into atomic, sequential steps using ONLY these active tools: [${activeToolsList}]
 Objective: ${objective}
 Context: ${context}
-
-You must return strictly a JSON object: 
-{ "steps": [{ "id": "step1", "action": "what to do", "tool": "toolName", "expectedOutput": "output" }] }`;
+Rules:
+1. DO NOT bypass security protocols.
+2. Return strictly a JSON object: { "steps": [{ "id": "step1", "action": "what to do", "tool": "toolName", "expectedOutput": "output" }] }`;
 
     const response = await openaiClient.chat.completions.create({
       model: 'gpt-4o',
@@ -37,23 +36,23 @@ You must return strictly a JSON object:
 
     try {
       const content = JSON.parse(response.choices[0].message.content || '{"steps":[]}');
-      const validPlan = planSchema.parse(content);
-      return validPlan.steps;
+      return planSchema.parse(content).steps;
     } catch (err) {
-      logger.error('Failed to parse and validate plan, returning minimal single step.', { err, content: response.choices[0].message.content });
-      return [{ id: 'step1', action: objective, tool: 'web_search', expectedOutput: 'final answer' }];
+      if (retryCount < 3) {
+        logger.warn(`Failure parsing JSON plan, retrying... (${retryCount + 1})`);
+        return this.createPlan(`Your last JSON was malformed. Strictly return valid JSON for: ${objective}`, context, retryCount + 1);
+      }
+      // Phase 3: Controlled Error, No Raw Execution
+      throw new Error('Unable to generate execution plan after 3 attempts.');
     }
   },
 
   async replan(objective: string, failureContext: { failedStep: any, error: string }): Promise<PlanStep[]> {
-    logger.warn('Agent Planner replanning', { failureContext });
-    const prompt = `You are a Deterministic Agent Planner. Your previous plan failed at a certain step.
-Original Objective: ${objective}
+    const prompt = `Your previous plan failed. Original Objective: ${objective}
 Failed Step: ${JSON.stringify(failureContext.failedStep)}
-Error Encountered: ${failureContext.error}
+Error: ${failureContext.error}
 
-Create a NEW plan to accomplish the objective bypassing this error. 
-Return strictly a JSON object matching { "steps": [...] }`;
+Create a NEW plan bypassing this error. Return strictly a JSON object matching { "steps": [...] }`;
 
     const response = await openaiClient.chat.completions.create({
       model: 'gpt-4o',
@@ -61,12 +60,6 @@ Return strictly a JSON object matching { "steps": [...] }`;
       response_format: { type: 'json_object' }
     });
 
-    try {
-      const content = JSON.parse(response.choices[0].message.content || '{"steps":[]}');
-      const validPlan = planSchema.parse(content);
-      return validPlan.steps;
-    } catch (err) {
-       throw new Error('Replan validation failed.');
-    }
+    return planSchema.parse(JSON.parse(response.choices[0].message.content || '{"steps":[]}')).steps;
   }
 };
