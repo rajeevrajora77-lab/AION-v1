@@ -23,12 +23,6 @@ function AuthBootstrap({ children }) {
   return children;
 }
 
-function ProtectedRoute({ children }) {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
-  return children;
-}
-
 const pageFallback = (
   <div className="flex items-center justify-center min-h-screen bg-gray-950 text-gray-400 text-sm">
     Loading…
@@ -42,76 +36,34 @@ function App() {
     <AuthBootstrap>
       <Suspense fallback={pageFallback}>
         <Routes>
+          {/* Auth routes - redirect to dashboard if already logged in */}
           <Route
             path="/login"
-            element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" replace />}
+            element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />}
           />
           <Route
             path="/signup"
-            element={!isAuthenticated ? <Signup /> : <Navigate to="/dashboard" replace />}
+            element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Signup />}
           />
 
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
+          {/* Dashboard and chat - publicly accessible (no login required) */}
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard/search" element={<Dashboard />} />
+          <Route path="/dashboard/voice" element={<Dashboard />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/help" element={<Help />} />
 
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute>
-                <Profile />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/help"
-            element={
-              <ProtectedRoute>
-                <Help />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/search"
-            element={
-              <ProtectedRoute>
-                <Search />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/voice"
-            element={
-              <ProtectedRoute>
-                <Voice />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <SettingsLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="/settings/general" replace />} />
+          {/* Settings routes */}
+          <Route path="/settings" element={<SettingsLayout />}>
+            <Route index element={<SettingsGeneral />} />
             <Route path="general" element={<SettingsGeneral />} />
             <Route path="personalization" element={<SettingsPersonalization />} />
             <Route path="api-keys" element={<SettingsAPIKeys />} />
           </Route>
 
-          <Route path="/" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Default redirect to dashboard */}
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Suspense>
     </AuthBootstrap>
