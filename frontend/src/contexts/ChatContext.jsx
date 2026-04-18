@@ -18,7 +18,16 @@ export function ChatProvider({ children }) {
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
 
+  // -------------------------------------------------------------------------
+  // loadSessions — only meaningful for authenticated users.
+  // Guests have no server-side sessions; return [] silently.
+  // -------------------------------------------------------------------------
   const loadSessions = useCallback(async () => {
+    const token = useAuthStore.getState().token;
+    if (!token) {
+      setSessions([]);
+      return [];
+    }
     try {
       const { data } = await api.get('/chat/sessions');
       setSessions(Array.isArray(data) ? data : []);
@@ -29,8 +38,14 @@ export function ChatProvider({ children }) {
     }
   }, []);
 
+  // -------------------------------------------------------------------------
+  // loadHistory — only meaningful for authenticated users.
+  // Guests have no persisted history; skip the API call and return false.
+  // -------------------------------------------------------------------------
   const loadHistory = useCallback(async (targetSessionId) => {
-    if (!targetSessionId) return false;
+    const token = useAuthStore.getState().token;
+    // No session id OR not logged in — nothing to load
+    if (!targetSessionId || !token) return false;
     try {
       const { data } = await api.get('/chat/history', {
         params: { sessionId: targetSessionId },
@@ -45,32 +60,51 @@ export function ChatProvider({ children }) {
     }
   }, []);
 
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // -------------------------------------------------------------------------
+  // On mount: restore session for authenticated users only.
+  // Guests start fresh every time — no 401 calls are made.
+  // -------------------------------------------------------------------------
   useEffect(() => {
     const init = async () => {
       const token = useAuthStore.getState().token;
+
+      // Guest user — nothing to restore, start with empty chat
+      if (!token) {
+        localStorage.removeItem(CHAT_SESSION_KEY);
+        return;
+      }
+
+      // Authenticated user — try to restore last session from localStorage
       const cachedSessionId = localStorage.getItem(CHAT_SESSION_KEY);
       if (cachedSessionId) {
         const loaded = await loadHistory(cachedSessionId);
         if (loaded) {
-          if (token) await loadSessions();
+          await loadSessions();
           return;
         }
+        // Cached session no longer valid (deleted, expired) — clear it
         localStorage.removeItem(CHAT_SESSION_KEY);
       }
-      if (token) {
-        const userSessions = await loadSessions();
-        if (userSessions.length > 0) {
-          await loadHistory(userSessions[0].sessionId);
-        }
+
+      // No cached session — load session list and restore most recent
+      const userSessions = await loadSessions();
+      if (userSessions.length > 0) {
+        await loadHistory(userSessions[0].sessionId);
       }
     };
     init();
   }, [loadHistory, loadSessions]);
 
+  // -------------------------------------------------------------------------
+  // handleSendMessage
+  // Works for both guests (no token, no sessionId returned) and
+  // authenticated users (token attached, sessionId persisted).
+  // -------------------------------------------------------------------------
   const handleSendMessage = async (e) => {
     e?.preventDefault();
     if (!input.trim() || isStreaming) return;
@@ -86,7 +120,6 @@ export function ChatProvider({ children }) {
     setMessages(newMessages);
     setIsStreaming(true);
 
-    // Use token if available (logged-in user), otherwise send as guest
     const token = useAuthStore.getState().token;
 
     try {
@@ -95,13 +128,14 @@ export function ChatProvider({ children }) {
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
+      const body = { message: userMessage };
+      // Only send sessionId when authenticated (backend ignores it for guests)
+      if (token && sessionId) body.sessionId = sessionId;
+
       const response = await fetch(`${api.defaults.baseURL}/chat`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          message: userMessage,
-          ...(sessionId && { sessionId }),
-        }),
+        body: JSON.stringify(body),
         signal: abortControllerRef.current.signal,
       });
 
@@ -136,10 +170,12 @@ export function ChatProvider({ children }) {
           try {
             const parsed = JSON.parse(data);
             if (parsed.done) {
+              // sessionId is only returned for authenticated users
               if (parsed.sessionId) {
                 setSessionId(parsed.sessionId);
                 localStorage.setItem(CHAT_SESSION_KEY, String(parsed.sessionId));
-                if (token) loadSessions();
+                // Refresh sidebar session list
+                loadSessions();
               }
               break;
             }
