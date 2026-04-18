@@ -2,7 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import Chat from '../models/Chat.js';
 import { streamChatCompletion, createChatCompletion } from '../utils/openai.js';
-import { protect } from '../middleware/auth.js';
+import { protect, optionalAuth } from '../middleware/auth.js';
 import { chatLimiter } from '../middleware/rateLimiter.js';
 import logger from '../utils/logger.js';
 
@@ -13,12 +13,12 @@ const MAX_MESSAGE_LENGTH = 10000;
 const MESSAGE_LIMIT = Chat.MESSAGE_LIMIT || 200;
 
 // POST /api/chat - Stream AI response
-// PROTECTED + RATE LIMITED
-router.post('/', protect, chatLimiter, async (req, res) => {
+// optionalAuth: logged-in users get persistent sessions; guests get ephemeral in-memory session
+router.post('/', optionalAuth, chatLimiter, async (req, res) => {
   try {
     logger.info('Incoming Chat Request', {
-      user: req.user?.email,
-      userId: req.user?._id,
+      user: req.user?.email || 'guest',
+      userId: req.user?._id || 'guest',
     });
 
     const { message, sessionId } = req.body;
@@ -39,39 +39,41 @@ router.post('/', protect, chatLimiter, async (req, res) => {
       sessionId: sessionId || 'new session',
     });
 
-    // Create/get session
+    // Create/get session — only persist to DB for authenticated users
     let chat = null;
-    if (sessionId && mongoose.Types.ObjectId.isValid(sessionId)) {
-      // Only allow access to own sessions
-      chat = await Chat.findOne({
-        _id: sessionId,
-        userId: req.user._id
-      });
-    }
+    if (req.user) {
+      if (sessionId && mongoose.Types.ObjectId.isValid(sessionId)) {
+        // Only allow access to own sessions
+        chat = await Chat.findOne({
+          _id: sessionId,
+          userId: req.user._id
+        });
+      }
 
-    if (!chat) {
-      chat = new Chat({
-        messages: [],
-        userId: req.user._id
-      });
-    }
+      if (!chat) {
+        chat = new Chat({
+          messages: [],
+          userId: req.user._id
+        });
+      }
 
-    // Enforce message limit per session
-    if (chat.messages.length >= MESSAGE_LIMIT) {
-      return res.status(400).json({
-        error: 'Session message limit reached',
-        message: `This session has reached the ${MESSAGE_LIMIT} message limit. Please start a new session.`,
-        code: 'SESSION_MESSAGE_LIMIT'
-      });
-    }
+      // Enforce message limit per session
+      if (chat.messages.length >= MESSAGE_LIMIT) {
+        return res.status(400).json({
+          error: 'Session message limit reached',
+          message: `This session has reached the ${MESSAGE_LIMIT} message limit. Please start a new session.`,
+          code: 'SESSION_MESSAGE_LIMIT'
+        });
+      }
 
-    // Add user message
-    chat.messages.push({
-      role: 'user',
-      content: trimmed,
-      timestamp: new Date(),
-    });
-    await chat.save();
+      // Add user message and save
+      chat.messages.push({
+        role: 'user',
+        content: trimmed,
+        timestamp: new Date(),
+      });
+      await chat.save();
+    }
 
     // Log to Winston
     logger.logRequest(req);
@@ -89,36 +91,48 @@ router.post('/', protect, chatLimiter, async (req, res) => {
       clientDisconnected = true;
     });
 
-    // Sanitize messages for LLM API — Groq/OpenAI only accept {role, content}
-    const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
+    // Build messages array for LLM API
+    // For guests: use only the current message (no history)
+    // For users: use full session history
+    let apiMessages;
+    if (req.user && chat) {
+      apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
+    } else {
+      apiMessages = [{ role: 'user', content: trimmed }];
+    }
 
     // Stream response
     let fullResponse = '';
     await streamChatCompletion(
       apiMessages,
       (chunk) => {
-        if (clientDisconnected) return; // Don't write to closed socket
+        if (clientDisconnected) return;
         fullResponse += chunk;
         res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
       }
     );
 
-    // Save AI response
-    chat.messages.push({
-      role: 'assistant',
-      content: fullResponse,
-      timestamp: new Date(),
-    });
-    await chat.save();
+    // Save AI response for authenticated users
+    if (req.user && chat) {
+      chat.messages.push({
+        role: 'assistant',
+        content: fullResponse,
+        timestamp: new Date(),
+      });
+      await chat.save();
+    }
 
     if (!clientDisconnected) {
-      res.write(`data: ${JSON.stringify({ done: true, sessionId: chat._id })}\n\n`);
+      // Only return a persistent sessionId for authenticated users
+      const responsePayload = { done: true };
+      if (req.user && chat) responsePayload.sessionId = chat._id;
+      res.write(`data: ${JSON.stringify(responsePayload)}\n\n`);
       res.end();
     }
 
     logger.info('Chat request completed', {
-      userId: req.user._id,
-      sessionId: chat._id,
+      userId: req.user?._id || 'guest',
+      sessionId: chat?._id || 'guest-ephemeral',
       messageLength: trimmed.length,
       responseLength: fullResponse.length
     });
@@ -126,7 +140,7 @@ router.post('/', protect, chatLimiter, async (req, res) => {
   } catch (error) {
     logger.error('Chat API Error', {
       route: 'POST /api/chat',
-      user: req.user?.email || 'Unknown',
+      user: req.user?.email || 'guest',
       errorMessage: error?.message || 'Unknown error',
       errorName: error?.name || 'N/A',
       errorStatus: error?.status || error?.response?.status || 'N/A',
@@ -149,7 +163,6 @@ router.post('/', protect, chatLimiter, async (req, res) => {
       return;
     }
 
-    // Classify OpenAI/Groq unavailability
     if (error.message === 'LLM API key is required but not configured' ||
         error.message === 'OpenAI unavailable' ||
         error.message === 'Circuit breaker is OPEN - service unavailable') {
@@ -158,7 +171,6 @@ router.post('/', protect, chatLimiter, async (req, res) => {
       });
     }
 
-    // OpenAI SDK v4 error format (error.status directly on the error object)
     if (error?.status) {
       return res.status(error.status).json({
         error: 'AI provider error',
@@ -169,7 +181,6 @@ router.post('/', protect, chatLimiter, async (req, res) => {
       });
     }
 
-    // Legacy SDK v3 error format (error.response.status)
     if (error?.response?.status) {
       const status = error.response.status;
       const data = error.response.data || {};
@@ -181,7 +192,6 @@ router.post('/', protect, chatLimiter, async (req, res) => {
       });
     }
 
-    // Fallback internal error — include message for debugging
     res.status(500).json({
       error: 'Failed to process chat request',
       detail: error?.message || 'Unknown error',
@@ -190,7 +200,7 @@ router.post('/', protect, chatLimiter, async (req, res) => {
 });
 
 // GET /api/chat/history - Get chat history
-// PROTECTED
+// PROTECTED — only authenticated users have history
 router.get('/history', protect, async (req, res) => {
   try {
     const { sessionId } = req.query;
@@ -203,7 +213,6 @@ router.get('/history', protect, async (req, res) => {
       return res.status(400).json({ error: 'Invalid session ID format' });
     }
 
-    // Only allow access to own sessions
     const chat = await Chat.findOne({
       _id: sessionId,
       userId: req.user._id
@@ -232,7 +241,6 @@ router.get('/history', protect, async (req, res) => {
 // PROTECTED
 router.get('/sessions', protect, async (req, res) => {
   try {
-    // Only show user's own sessions
     const sessions = await Chat.find({ userId: req.user._id })
       .select('_id messages createdAt updatedAt')
       .sort({ updatedAt: -1 })
@@ -276,7 +284,6 @@ router.post('/complete', protect, chatLimiter, async (req, res) => {
 
     let chat = null;
     if (sessionId && mongoose.Types.ObjectId.isValid(sessionId)) {
-      // Only allow access to own sessions
       chat = await Chat.findOne({
         _id: sessionId,
         userId: req.user._id
@@ -290,7 +297,6 @@ router.post('/complete', protect, chatLimiter, async (req, res) => {
       });
     }
 
-    // Enforce message limit per session
     if (chat.messages.length >= MESSAGE_LIMIT) {
       return res.status(400).json({
         error: 'Session message limit reached',
@@ -306,10 +312,8 @@ router.post('/complete', protect, chatLimiter, async (req, res) => {
     });
     await chat.save();
 
-    // Sanitize messages for LLM API — only {role, content} allowed
     const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
 
-    // Get full response
     const completion = await createChatCompletion(apiMessages);
     const responseContent = completion.choices[0].message.content;
 
@@ -344,66 +348,22 @@ router.delete('/history/:id', protect, async (req, res) => {
       return res.status(400).json({ error: 'Invalid session ID format' });
     }
 
-    // Only allow deletion of own sessions
-    const result = await Chat.findOneAndDelete({
+    const chat = await Chat.findOneAndDelete({
       _id: id,
       userId: req.user._id
     });
 
-    if (!result) {
+    if (!chat) {
       return res.status(404).json({ error: 'Session not found or access denied' });
     }
 
-    logger.logAuth('Chat session deleted', {
-      userId: req.user._id,
-      sessionId: id
-    });
-
-    res.json({ message: 'Session deleted successfully' });
+    res.json({ success: true, message: 'Session deleted successfully' });
   } catch (error) {
     logger.logApiError(error, {
       route: 'DELETE /api/chat/history/:id',
       userId: req.user?._id
     });
     res.status(500).json({ error: 'Failed to delete session' });
-  }
-});
-
-// POST /api/chat/clear - Clear all messages in session
-// PROTECTED
-router.post('/clear', protect, async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-
-    if (!sessionId) {
-      return res.status(400).json({ error: 'Session ID required' });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
-      return res.status(400).json({ error: 'Invalid session ID format' });
-    }
-
-    // Only allow clearing own sessions
-    const chat = await Chat.findOneAndUpdate(
-      {
-        _id: sessionId,
-        userId: req.user._id
-      },
-      { messages: [] },
-      { new: true }
-    );
-
-    if (!chat) {
-      return res.status(404).json({ error: 'Session not found or access denied' });
-    }
-
-    res.json({ message: 'Session cleared successfully', sessionId: chat._id });
-  } catch (error) {
-    logger.logApiError(error, {
-      route: 'POST /api/chat/clear',
-      userId: req.user?._id
-    });
-    res.status(500).json({ error: 'Failed to clear session' });
   }
 });
 
