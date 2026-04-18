@@ -192,16 +192,5 @@ export const createChatCompletion = async (messages, model = null) => {
     )
   );
 };
-// ============================================================
-// EMBEDDING (OpenAI only — Groq does not support embeddings)
-// ============================================================
-export const createEmbedding = async (text) => {
-  if (useGroq) {
-    logger.warn('Embeddings not supported with Groq — skipping');
-    return null;
-  }
-  return retryWithBackoff(() =>
-    client.embeddings.create({ model: 'text-embedding-3-small', input: text })
-  );
-};
+
 export { client };
