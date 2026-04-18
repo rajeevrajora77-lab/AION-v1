@@ -52,24 +52,22 @@ export function ChatProvider({ children }) {
   useEffect(() => {
     const init = async () => {
       const token = useAuthStore.getState().token;
-      if (!token) return;
-
       const cachedSessionId = localStorage.getItem(CHAT_SESSION_KEY);
       if (cachedSessionId) {
         const loaded = await loadHistory(cachedSessionId);
         if (loaded) {
-          await loadSessions();
+          if (token) await loadSessions();
           return;
         }
         localStorage.removeItem(CHAT_SESSION_KEY);
       }
-
-      const userSessions = await loadSessions();
-      if (userSessions.length > 0) {
-        await loadHistory(userSessions[0].sessionId);
+      if (token) {
+        const userSessions = await loadSessions();
+        if (userSessions.length > 0) {
+          await loadHistory(userSessions[0].sessionId);
+        }
       }
     };
-
     init();
   }, [loadHistory, loadSessions]);
 
@@ -80,7 +78,6 @@ export function ChatProvider({ children }) {
     setError(null);
     const userMessage = input.trim();
     setInput('');
-
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -89,22 +86,18 @@ export function ChatProvider({ children }) {
     setMessages(newMessages);
     setIsStreaming(true);
 
+    // Use token if available (logged-in user), otherwise send as guest
     const token = useAuthStore.getState().token;
-    if (!token) {
-      setError('You are not logged in. Please sign in to use the chat.');
-      setIsStreaming(false);
-      return;
-    }
 
     try {
       abortControllerRef.current = new AbortController();
 
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const response = await fetch(`${api.defaults.baseURL}/chat`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers,
         body: JSON.stringify({
           message: userMessage,
           sessionId: sessionId,
@@ -137,22 +130,19 @@ export function ChatProvider({ children }) {
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith('data:')) continue;
-
           const data = trimmed.slice(5).trim();
           if (!data) continue;
 
           try {
             const parsed = JSON.parse(data);
-
             if (parsed.done) {
               if (parsed.sessionId) {
                 setSessionId(parsed.sessionId);
                 localStorage.setItem(CHAT_SESSION_KEY, String(parsed.sessionId));
-                loadSessions();
+                if (token) loadSessions();
               }
               break;
             }
-
             if (parsed.content) {
               setMessages((prev) => {
                 const updated = [...prev];
@@ -170,7 +160,6 @@ export function ChatProvider({ children }) {
                 return updated;
               });
             }
-
             if (parsed.error) {
               setError(parsed.error);
               break;
