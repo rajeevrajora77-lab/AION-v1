@@ -18,9 +18,14 @@ const messageSchema = new mongoose.Schema({
 
 const chatSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      // No `index: true` here — compound index below covers userId queries
+    },
     sessionId: {
       type: String,
-      required: true,
       index: true,
     },
     title: {
@@ -33,30 +38,18 @@ const chatSchema = new mongoose.Schema(
       totalTokens: Number,
       averageResponseTime: Number,
     },
-    createdAt: {
-      type: Date,
-      default: Date.now,
-      index: true,
-    },
-    updatedAt: {
-      type: Date,
-      default: Date.now,
-    },
+    // No manual createdAt/updatedAt — Mongoose `timestamps: true` handles this
   },
   { timestamps: true }
 );
 
-// Index for efficient queries
+// Indexes for efficient queries
+chatSchema.index({ userId: 1, createdAt: -1 }); // User's chats sorted by date
+chatSchema.index({ userId: 1, updatedAt: -1 }); // User's chats sorted by last update
 chatSchema.index({ sessionId: 1, createdAt: -1 });
 
 // TTL index to auto-delete after 90 days
 chatSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7776000 });
-
-// Auto-update updatedAt on save
-chatSchema.pre('save', function (next) {
-  this.updatedAt = Date.now();
-  next();
-});
 
 // Generate conversation title from first user message
 chatSchema.methods.generateTitle = function () {
@@ -68,6 +61,26 @@ chatSchema.methods.generateTitle = function () {
       (firstMessage.content.length > 50 ? '...' : '');
   }
 };
+
+// Static method to get user's chat statistics
+chatSchema.statics.getUserStats = async function (userId) {
+  const stats = await this.aggregate([
+    { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+    {
+      $group: {
+        _id: null,
+        totalChats: { $sum: 1 },
+        totalMessages: { $sum: { $size: '$messages' } },
+        avgMessagesPerChat: { $avg: { $size: '$messages' } },
+      },
+    },
+  ]);
+
+  return stats[0] || { totalChats: 0, totalMessages: 0, avgMessagesPerChat: 0 };
+};
+
+// Message limit constant — exported for route guards
+chatSchema.statics.MESSAGE_LIMIT = 200;
 
 const Chat = mongoose.model('Chat', chatSchema);
 

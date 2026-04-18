@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import logger from '../utils/logger.js';
 
 export function requestLogger(req, res, next) {
   const id = crypto.randomUUID();
@@ -9,7 +10,7 @@ export function requestLogger(req, res, next) {
 
   res.on('finish', () => {
     const duration = Date.now() - start;
-    console.log(JSON.stringify({
+    logger.info('Request completed', {
       type: 'request',
       id,
       method: req.method,
@@ -17,7 +18,7 @@ export function requestLogger(req, res, next) {
       status: res.statusCode,
       duration,
       timestamp: new Date().toISOString(),
-    }));
+    });
   });
 
   next();

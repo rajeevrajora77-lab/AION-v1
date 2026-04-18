@@ -1,10 +1,73 @@
-import Chat from './components/Chat';
-import Search from './components/Search';
+import { lazy, Suspense, useEffect } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { useAuthStore } from './store/authStore';
+import Login from './pages/Login.jsx';
+import Signup from './pages/Signup.jsx';
+
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
+const Profile = lazy(() => import('./pages/Profile.jsx'));
+const Help = lazy(() => import('./pages/Help.jsx'));
+const Search = lazy(() => import('./components/Search.jsx'));
+const Voice = lazy(() => import('./components/Voice.jsx'));
+const SettingsLayout = lazy(() => import('./pages/settings/SettingsLayout.jsx'));
+const SettingsGeneral = lazy(() => import('./pages/settings/SettingsGeneral.jsx'));
+const SettingsPersonalization = lazy(() => import('./pages/settings/SettingsPersonalization.jsx'));
+const SettingsAPIKeys = lazy(() => import('./pages/settings/SettingsAPIKeys.jsx'));
+
+function AuthBootstrap({ children }) {
+  const token = useAuthStore((s) => s.token);
+  const fetchCurrentUser = useAuthStore((s) => s.fetchCurrentUser);
+  useEffect(() => {
+    if (token) fetchCurrentUser();
+  }, [token, fetchCurrentUser]);
+  return children;
+}
+
+const pageFallback = (
+  <div className="flex items-center justify-center min-h-screen bg-gray-950 text-gray-400 text-sm">
+    Loading…
+  </div>
+);
 
 function App() {
-  // For now, just render Chat component with integrated sidebar
-  // Search functionality can be added later as a tab within the sidebar
-  return <Chat />;
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  return (
+    <AuthBootstrap>
+      <Suspense fallback={pageFallback}>
+        <Routes>
+          {/* Auth routes - redirect to dashboard if already logged in */}
+          <Route
+            path="/login"
+            element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />}
+          />
+          <Route
+            path="/signup"
+            element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Signup />}
+          />
+
+          {/* Dashboard and chat - publicly accessible (no login required) */}
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard/search" element={<Dashboard />} />
+          <Route path="/dashboard/voice" element={<Dashboard />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/help" element={<Help />} />
+
+          {/* Settings routes */}
+          <Route path="/settings" element={<SettingsLayout />}>
+            <Route index element={<SettingsGeneral />} />
+            <Route path="general" element={<SettingsGeneral />} />
+            <Route path="personalization" element={<SettingsPersonalization />} />
+            <Route path="api-keys" element={<SettingsAPIKeys />} />
+          </Route>
+
+          {/* Default redirect to dashboard */}
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </Suspense>
+    </AuthBootstrap>
+  );
 }
 
 export default App;

@@ -1,4 +1,17 @@
 import axios from 'axios';
+import { createChatCompletion } from './openai.js';
+
+// ============================================================================
+// XML ESCAPE — Prevents injection in SSML payloads
+// ============================================================================
+function escapeXml(unsafe) {
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
 
 // Synthesize text to speech
 export async function synthesizeText(text, voice = 'en-US') {
@@ -52,12 +65,13 @@ async function synthesizeWithGoogle(text, voice) {
   }
 }
 
-// Synthesize using Azure
+// Synthesize using Azure — XML-safe SSML
 async function synthesizeWithAzure(text, voice) {
   try {
+    const escapedText = escapeXml(text);
     const response = await axios.post(
       `https://${process.env.AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1`,
-      `<speak version='1.0' xml:lang='${voice}'><voice name='${voice}-Neural'>${text}</voice></speak>`,
+      `<speak version='1.0' xml:lang='${voice}'><voice name='${voice}-Neural'>${escapedText}</voice></speak>`,
       {
         headers: {
           'Ocp-Apim-Subscription-Key': process.env.AZURE_SPEECH_KEY,
@@ -74,10 +88,8 @@ async function synthesizeWithAzure(text, voice) {
   }
 }
 
-// Mock audio data for testing
+// Mock audio data for testing — returns WAV format
 function getMockAudioData(text) {
-  // Return a simple WAV file header with silence
-  // This is a minimal valid WAV file
   const sampleRate = 16000;
   const duration = 1; // 1 second
   const numSamples = sampleRate * duration;
@@ -116,13 +128,28 @@ function getMockAudioData(text) {
   return wavHeader;
 }
 
-// Process speech to text (frontend handles this with Web Speech API)
-export function processTranscript(transcript) {
-  return {
-    originalTranscript: transcript,
-    processedAt: new Date().toISOString(),
-    confidence: Math.random() * 0.3 + 0.7, // Mock confidence score
-  };
+// Process voice transcript — send to LLM for AI response
+export async function processVoiceTranscript(transcript) {
+  try {
+    const messages = [
+      { role: 'system', content: 'You are AION, a helpful AI voice assistant. Respond concisely and naturally for voice output.' },
+      { role: 'user', content: transcript },
+    ];
+    const completion = await createChatCompletion(messages);
+    const reply = completion.choices[0].message.content;
+    return {
+      reply,
+      originalTranscript: transcript,
+      processedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('Voice LLM processing error:', error.message);
+    return {
+      reply: 'Sorry, I encountered an error processing your request. Please try again.',
+      originalTranscript: transcript,
+      processedAt: new Date().toISOString(),
+    };
+  }
 }
 
 export default synthesizeText;

@@ -1,26 +1,31 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Chat from '../models/Chat.js';
 import { streamChatCompletion, createChatCompletion } from '../utils/openai.js';
-import mongoose from 'mongoose';
+import { protect } from '../middleware/auth.js';
+import { chatLimiter } from '../middleware/rateLimiter.js';
+import logger from '../utils/logger.js';
 
 const router = express.Router();
 
-// Helper function to validate MongoDB ObjectId
-function isValidObjectId(id) {
-  return mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === id;
-}
+// Configuration
+const MAX_MESSAGE_LENGTH = 10000;
+const MESSAGE_LIMIT = Chat.MESSAGE_LIMIT || 200;
 
 // POST /api/chat - Stream AI response
-router.post('/', async (req, res) => {
+// PROTECTED + RATE LIMITED — authentication required
+router.post('/', protect, chatLimiter, async (req, res) => {
   try {
-        console.log('\n📥 Incoming Chat Request');
-    console.log('  - Timestamp:', new Date().toISOString());
-    console.log('  - Message length:', message?.length || 0);
-    console.log('  - Session ID:', sessionId || 'new session');
+    logger.info('Incoming Chat Request', {
+      user: req.user?.email,
+      userId: req.user?._id,
+    });
+
     const { message, sessionId } = req.body;
-    
-    // Validate message
-    if (!message || typeof message !== 'string' || !message.trim()) {
+
+    // Enhanced input validation
+    const trimmed = message?.trim();
+    if (!trimmed) {
       return res.status(400).json({ error: 'Message cannot be empty' });
       
     // Enhanced input validation
@@ -39,49 +44,81 @@ router.post('/', async (req, res) => {
       });
     }
     }
-    
-    // Create/get session with proper validation
+    if (trimmed.length > MAX_MESSAGE_LENGTH) {
+      return res.status(400).json({
+        error: `Message is too long (max ${MAX_MESSAGE_LENGTH} characters)`
+      });
+    }
+
+    logger.info('Chat message details', {
+      messageLength: trimmed.length,
+      sessionId: sessionId || 'new session',
+    });
+
+    // Create/get session
     let chat = null;
-    if (sessionId) {
-      // Validate sessionId is a proper MongoDB ObjectId
-      if (!isValidObjectId(sessionId)) {
-        console.warn(`Invalid sessionId format: ${sessionId}`);
-        // Create new session instead of failing
-        chat = new Chat({ messages: [] });
-      } else {
-        chat = await Chat.findById(sessionId);
-      }
+    if (sessionId && mongoose.Types.ObjectId.isValid(sessionId)) {
+      // Only allow access to own sessions
+      chat = await Chat.findOne({
+        _id: sessionId,
+        userId: req.user._id
+      });
     }
-    
+
     if (!chat) {
-      chat = new Chat({ messages: [] });
+      chat = new Chat({
+        messages: [],
+        userId: req.user._id
+      });
     }
-    
+
+    // Enforce message limit per session
+    if (chat.messages.length >= MESSAGE_LIMIT) {
+      return res.status(400).json({
+        error: 'Session message limit reached',
+        message: `This session has reached the ${MESSAGE_LIMIT} message limit. Please start a new session.`,
+        code: 'SESSION_MESSAGE_LIMIT'
+      });
+    }
+
     // Add user message
     chat.messages.push({
       role: 'user',
-      content: message,
+      content: trimmed,
       timestamp: new Date(),
     });
     await chat.save();
-    
+
+    // Log to Winston
+    logger.logRequest(req);
+
     // SSE headers for streaming
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Transfer-Encoding', 'chunked');
-    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx/CDN buffering
-    
-    // Stream response from OpenAI
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    // Detect client disconnect to stop wasting LLM tokens
+    let clientDisconnected = false;
+    req.on('close', () => {
+      clientDisconnected = true;
+    });
+
+    // Sanitize messages for LLM API — Groq/OpenAI only accept {role, content}
+    const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
+
+    // Stream response
     let fullResponse = '';
     await streamChatCompletion(
-      chat.messages,
+      apiMessages,
       (chunk) => {
+        if (clientDisconnected) return;
         fullResponse += chunk;
         res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
       }
     );
-    
+
     // Save AI response
     chat.messages.push({
       role: 'assistant',
@@ -89,44 +126,58 @@ router.post('/', async (req, res) => {
       timestamp: new Date(),
     });
     await chat.save();
-    
-    res.write(`data: ${JSON.stringify({ done: true, sessionId: chat._id })}\n\n`);
-    res.end();
-    
-  } catch (error) {
-    // Safe, structured logging
-        console.log('\n=======================');
-    console.log('🚨 CHAT API ERROR');
-    console.log('=======================');
-    console.log('📍 Route: POST /api/chat');
-    console.log('📅 Timestamp:', new Date().toISOString());
-    console.log('\n🔍 Error Details:');
-    console.log('  - Message:', error?.message || 'Unknown error');
-    console.log('  - Name:', error?.name || 'N/A');
-    console.log('  - Code:', error?.code || 'N/A');
-    console.log('  - Status:', error?.status || 'N/A');
-    console.log('  - Type:', error?.type || 'N/A');
-    console.log('=======================\n');
 
-    // Avoid writing to SSE after headers already sent
+    if (!clientDisconnected) {
+      res.write(`data: ${JSON.stringify({ done: true, sessionId: chat._id })}\n\n`);
+      res.end();
+    }
+
+    logger.info('Chat request completed', {
+      userId: req.user._id,
+      sessionId: chat._id,
+      messageLength: trimmed.length,
+      responseLength: fullResponse.length
+    });
+
+  } catch (error) {
+    logger.error('Chat API Error', {
+      route: 'POST /api/chat',
+      user: req.user?.email || 'Unknown',
+      errorMessage: error?.message || 'Unknown error',
+      errorName: error?.name || 'N/A',
+      errorStatus: error?.status || error?.response?.status || 'N/A',
+      errorCode: error?.code || 'N/A',
+    });
+
+    logger.logApiError(error, {
+      route: 'POST /api/chat',
+      userId: req.user?._id
+    });
+
     if (res.headersSent) {
       try {
         res.write(`data: ${JSON.stringify({ error: 'stream_error' })}\n\n`);
         res.end();
-      } catch (_) {
-        // ignore
-      }
+      } catch (_) {}
       return;
     }
 
-    // Classify OpenAI unavailability
-    if (error.message === 'OpenAI unavailable') {
-      return res.status(503).json({
-        error: 'AI service temporarily unavailable',
+    if (error.message === 'LLM API key is required but not configured' ||
+        error.message === 'OpenAI unavailable' ||
+        error.message === 'Circuit breaker is OPEN - service unavailable') {
+      return res.status(503).json({ error: 'AI service temporarily unavailable' });
+    }
+
+    if (error?.status) {
+      return res.status(error.status).json({
+        error: 'AI provider error',
+        providerStatus: error.status,
+        providerMessage: error.message || null,
+        providerCode: error.code || null,
+        providerType: error.type || null,
       });
     }
 
-    // OpenAI API error formats
     if (error?.response?.status) {
       const status = error.response.status;
       const data = error.response.data || {};
@@ -138,31 +189,25 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Fallback internal error
     res.status(500).json({
       error: 'Failed to process chat request',
+      detail: error?.message || 'Unknown error',
     });
   }
 });
 
-// GET /api/chat/history - Get chat history
-router.get('/history', async (req, res) => {
+// GET /api/chat/history
+// PROTECTED
+router.get('/history', protect, async (req, res) => {
   try {
     const { sessionId } = req.query;
-    
-    if (!sessionId) {
-      return res.status(400).json({ error: 'Session ID required' });
-    }
-    
-    if (!isValidObjectId(sessionId)) {
+    if (!sessionId) return res.status(400).json({ error: 'Session ID required' });
+    if (!mongoose.Types.ObjectId.isValid(sessionId))
       return res.status(400).json({ error: 'Invalid session ID format' });
-    }
-    
-    const chat = await Chat.findById(sessionId);
-    if (!chat) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-    
+
+    const chat = await Chat.findOne({ _id: sessionId, userId: req.user._id });
+    if (!chat) return res.status(404).json({ error: 'Session not found or access denied' });
+
     res.json({
       sessionId: chat._id,
       messages: chat.messages,
@@ -170,129 +215,91 @@ router.get('/history', async (req, res) => {
       updatedAt: chat.updatedAt,
     });
   } catch (error) {
-    console.error('History fetch error:', error);
+    logger.logApiError(error, { route: 'GET /api/chat/history', userId: req.user?._id });
     res.status(500).json({ error: 'Failed to fetch history' });
   }
 });
 
-// GET /api/chat/sessions - List all sessions
-router.get('/sessions', async (req, res) => {
+// GET /api/chat/sessions
+// PROTECTED
+router.get('/sessions', protect, async (req, res) => {
   try {
-    const sessions = await Chat.find()
+    const sessions = await Chat.find({ userId: req.user._id })
       .select('_id messages createdAt updatedAt')
       .sort({ updatedAt: -1 })
       .limit(50);
-    
+
     res.json(
       sessions.map((session) => ({
         sessionId: session._id,
         messageCount: session.messages.length,
-        lastMessage: session.messages[session.messages.length - 1]?.content || '',
+        lastMessage: (session.messages[session.messages.length - 1]?.content || '').substring(0, 100),
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
       }))
     );
   } catch (error) {
-    console.error('Sessions fetch error:', error);
+    logger.logApiError(error, { route: 'GET /api/chat/sessions', userId: req.user?._id });
     res.status(500).json({ error: 'Failed to fetch sessions' });
   }
 });
 
 // POST /api/chat/complete - Non-streaming completion
-router.post('/complete', async (req, res) => {
+// PROTECTED + RATE LIMITED
+router.post('/complete', protect, chatLimiter, async (req, res) => {
   try {
     const { message, sessionId } = req.body;
-    
-    if (!message || !message.trim()) {
-      return res.status(400).json({ error: 'Message cannot be empty' });
-    }
-    
+    const trimmed = message?.trim();
+    if (!trimmed) return res.status(400).json({ error: 'Message cannot be empty' });
+    if (trimmed.length > MAX_MESSAGE_LENGTH)
+      return res.status(400).json({ error: `Message is too long (max ${MAX_MESSAGE_LENGTH} characters)` });
+
     let chat = null;
-    if (sessionId && isValidObjectId(sessionId)) {
-      chat = await Chat.findById(sessionId);
+    if (sessionId && mongoose.Types.ObjectId.isValid(sessionId))
+      chat = await Chat.findOne({ _id: sessionId, userId: req.user._id });
+
+    if (!chat) chat = new Chat({ messages: [], userId: req.user._id });
+
+    if (chat.messages.length >= MESSAGE_LIMIT) {
+      return res.status(400).json({
+        error: 'Session message limit reached',
+        message: `This session has reached the ${MESSAGE_LIMIT} message limit. Please start a new session.`,
+        code: 'SESSION_MESSAGE_LIMIT'
+      });
     }
-    
-    if (!chat) {
-      chat = new Chat({ messages: [] });
-    }
-    
-    chat.messages.push({
-      role: 'user',
-      content: message,
-      timestamp: new Date(),
-    });
+
+    chat.messages.push({ role: 'user', content: trimmed, timestamp: new Date() });
     await chat.save();
-    
-    // Get full response
-    const response = await createChatCompletion(chat.messages);
-    
-    chat.messages.push({
-      role: 'assistant',
-      content: response.content,
-      timestamp: new Date(),
-    });
+
+    const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
+    const completion = await createChatCompletion(apiMessages);
+    const responseContent = completion.choices[0].message.content;
+
+    chat.messages.push({ role: 'assistant', content: responseContent, timestamp: new Date() });
     await chat.save();
-    
-    res.json({
-      sessionId: chat._id,
-      response: response.content,
-      messages: chat.messages,
-    });
+
+    res.json({ sessionId: chat._id, response: responseContent, messages: chat.messages });
   } catch (error) {
-    console.error('Completion error:', error);
+    logger.logApiError(error, { route: 'POST /api/chat/complete', userId: req.user?._id });
     res.status(500).json({ error: 'Failed to generate completion' });
   }
 });
 
-// DELETE /api/chat/history/:id - Delete conversation
-router.delete('/history/:id', async (req, res) => {
+// DELETE /api/chat/history/:id
+// PROTECTED
+router.delete('/history/:id', protect, async (req, res) => {
   try {
     const { id } = req.params;
-    
-    if (!isValidObjectId(id)) {
+    if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: 'Invalid session ID format' });
-    }
-    
-    const result = await Chat.findByIdAndDelete(id);
-    
-    if (!result) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-    
-    res.json({ message: 'Session deleted successfully' });
-  } catch (error) {
-    console.error('Delete error:', error);
-    res.status(500).json({ error: 'Failed to delete session' });
-  }
-});
 
-// POST /api/chat/clear - Clear all messages in session
-router.post('/clear', async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-    
-    if (!sessionId) {
-      return res.status(400).json({ error: 'Session ID required' });
-    }
-    
-    if (!isValidObjectId(sessionId)) {
-      return res.status(400).json({ error: 'Invalid session ID format' });
-    }
-    
-    const chat = await Chat.findByIdAndUpdate(
-      sessionId,
-      { messages: [] },
-      { new: true }
-    );
-    
-    if (!chat) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-    
-    res.json({ message: 'Session cleared successfully', sessionId: chat._id });
+    const chat = await Chat.findOneAndDelete({ _id: id, userId: req.user._id });
+    if (!chat) return res.status(404).json({ error: 'Session not found or access denied' });
+
+    res.json({ success: true, message: 'Session deleted successfully' });
   } catch (error) {
-    console.error('Clear error:', error);
-    res.status(500).json({ error: 'Failed to clear session' });
+    logger.logApiError(error, { route: 'DELETE /api/chat/history/:id', userId: req.user?._id });
+    res.status(500).json({ error: 'Failed to delete session' });
   }
 });
 

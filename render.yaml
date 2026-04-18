@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: aion-backend-staging
+    env: node
+    region: singapore
+    plan: starter
+    buildCommand: cd backend && npm ci && npm run build
+    startCommand: cd backend && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: staging
+
+  - type: web
+    name: aion-backend-production
+    env: node
+    region: singapore
+    plan: standard
+    buildCommand: cd backend && npm ci && npm run build
+    startCommand: cd backend && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
