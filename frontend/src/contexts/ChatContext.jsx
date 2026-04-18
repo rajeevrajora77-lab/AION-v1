@@ -100,7 +100,7 @@ export function ChatProvider({ children }) {
         headers,
         body: JSON.stringify({
           message: userMessage,
-          sessionId: sessionId,
+          ...(sessionId && { sessionId }),
         }),
         signal: abortControllerRef.current.signal,
       });
