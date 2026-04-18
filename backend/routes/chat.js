@@ -2,7 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import Chat from '../models/Chat.js';
 import { streamChatCompletion, createChatCompletion } from '../utils/openai.js';
-import { protect, optionalAuth } from '../middleware/auth.js';
+import { protect } from '../middleware/auth.js';
 import { chatLimiter } from '../middleware/rateLimiter.js';
 import logger from '../utils/logger.js';
 
@@ -13,12 +13,12 @@ const MAX_MESSAGE_LENGTH = 10000;
 const MESSAGE_LIMIT = Chat.MESSAGE_LIMIT || 200;
 
 // POST /api/chat - Stream AI response
-// optionalAuth: logged-in users get persistent sessions; guests get ephemeral in-memory session
-router.post('/', optionalAuth, chatLimiter, async (req, res) => {
+// PROTECTED + RATE LIMITED — authentication required
+router.post('/', protect, chatLimiter, async (req, res) => {
   try {
     logger.info('Incoming Chat Request', {
-      user: req.user?.email || 'guest',
-      userId: req.user?._id || 'guest',
+      user: req.user?.email,
+      userId: req.user?._id,
     });
 
     const { message, sessionId } = req.body;
@@ -39,41 +39,39 @@ router.post('/', optionalAuth, chatLimiter, async (req, res) => {
       sessionId: sessionId || 'new session',
     });
 
-    // Create/get session — only persist to DB for authenticated users
+    // Create/get session
     let chat = null;
-    if (req.user) {
-      if (sessionId && mongoose.Types.ObjectId.isValid(sessionId)) {
-        // Only allow access to own sessions
-        chat = await Chat.findOne({
-          _id: sessionId,
-          userId: req.user._id
-        });
-      }
-
-      if (!chat) {
-        chat = new Chat({
-          messages: [],
-          userId: req.user._id
-        });
-      }
-
-      // Enforce message limit per session
-      if (chat.messages.length >= MESSAGE_LIMIT) {
-        return res.status(400).json({
-          error: 'Session message limit reached',
-          message: `This session has reached the ${MESSAGE_LIMIT} message limit. Please start a new session.`,
-          code: 'SESSION_MESSAGE_LIMIT'
-        });
-      }
-
-      // Add user message and save
-      chat.messages.push({
-        role: 'user',
-        content: trimmed,
-        timestamp: new Date(),
+    if (sessionId && mongoose.Types.ObjectId.isValid(sessionId)) {
+      // Only allow access to own sessions
+      chat = await Chat.findOne({
+        _id: sessionId,
+        userId: req.user._id
       });
-      await chat.save();
     }
+
+    if (!chat) {
+      chat = new Chat({
+        messages: [],
+        userId: req.user._id
+      });
+    }
+
+    // Enforce message limit per session
+    if (chat.messages.length >= MESSAGE_LIMIT) {
+      return res.status(400).json({
+        error: 'Session message limit reached',
+        message: `This session has reached the ${MESSAGE_LIMIT} message limit. Please start a new session.`,
+        code: 'SESSION_MESSAGE_LIMIT'
+      });
+    }
+
+    // Add user message
+    chat.messages.push({
+      role: 'user',
+      content: trimmed,
+      timestamp: new Date(),
+    });
+    await chat.save();
 
     // Log to Winston
     logger.logRequest(req);
@@ -91,15 +89,8 @@ router.post('/', optionalAuth, chatLimiter, async (req, res) => {
       clientDisconnected = true;
     });
 
-    // Build messages array for LLM API
-    // For guests: use only the current message (no history)
-    // For users: use full session history
-    let apiMessages;
-    if (req.user && chat) {
-      apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
-    } else {
-      apiMessages = [{ role: 'user', content: trimmed }];
-    }
+    // Sanitize messages for LLM API — Groq/OpenAI only accept {role, content}
+    const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
 
     // Stream response
     let fullResponse = '';
@@ -112,27 +103,22 @@ router.post('/', optionalAuth, chatLimiter, async (req, res) => {
       }
     );
 
-    // Save AI response for authenticated users
-    if (req.user && chat) {
-      chat.messages.push({
-        role: 'assistant',
-        content: fullResponse,
-        timestamp: new Date(),
-      });
-      await chat.save();
-    }
+    // Save AI response
+    chat.messages.push({
+      role: 'assistant',
+      content: fullResponse,
+      timestamp: new Date(),
+    });
+    await chat.save();
 
     if (!clientDisconnected) {
-      // Only return a persistent sessionId for authenticated users
-      const responsePayload = { done: true };
-      if (req.user && chat) responsePayload.sessionId = chat._id;
-      res.write(`data: ${JSON.stringify(responsePayload)}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true, sessionId: chat._id })}\n\n`);
       res.end();
     }
 
     logger.info('Chat request completed', {
-      userId: req.user?._id || 'guest',
-      sessionId: chat?._id || 'guest-ephemeral',
+      userId: req.user._id,
+      sessionId: chat._id,
       messageLength: trimmed.length,
       responseLength: fullResponse.length
     });
@@ -140,7 +126,7 @@ router.post('/', optionalAuth, chatLimiter, async (req, res) => {
   } catch (error) {
     logger.error('Chat API Error', {
       route: 'POST /api/chat',
-      user: req.user?.email || 'guest',
+      user: req.user?.email || 'Unknown',
       errorMessage: error?.message || 'Unknown error',
       errorName: error?.name || 'N/A',
       errorStatus: error?.status || error?.response?.status || 'N/A',
@@ -152,23 +138,18 @@ router.post('/', optionalAuth, chatLimiter, async (req, res) => {
       userId: req.user?._id
     });
 
-    // Avoid writing to SSE after headers already sent
     if (res.headersSent) {
       try {
         res.write(`data: ${JSON.stringify({ error: 'stream_error' })}\n\n`);
         res.end();
-      } catch (_) {
-        // ignore
-      }
+      } catch (_) {}
       return;
     }
 
     if (error.message === 'LLM API key is required but not configured' ||
         error.message === 'OpenAI unavailable' ||
         error.message === 'Circuit breaker is OPEN - service unavailable') {
-      return res.status(503).json({
-        error: 'AI service temporarily unavailable',
-      });
+      return res.status(503).json({ error: 'AI service temporarily unavailable' });
     }
 
     if (error?.status) {
@@ -199,28 +180,17 @@ router.post('/', optionalAuth, chatLimiter, async (req, res) => {
   }
 });
 
-// GET /api/chat/history - Get chat history
-// PROTECTED — only authenticated users have history
+// GET /api/chat/history
+// PROTECTED
 router.get('/history', protect, async (req, res) => {
   try {
     const { sessionId } = req.query;
-
-    if (!sessionId) {
-      return res.status(400).json({ error: 'Session ID required' });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+    if (!sessionId) return res.status(400).json({ error: 'Session ID required' });
+    if (!mongoose.Types.ObjectId.isValid(sessionId))
       return res.status(400).json({ error: 'Invalid session ID format' });
-    }
 
-    const chat = await Chat.findOne({
-      _id: sessionId,
-      userId: req.user._id
-    });
-
-    if (!chat) {
-      return res.status(404).json({ error: 'Session not found or access denied' });
-    }
+    const chat = await Chat.findOne({ _id: sessionId, userId: req.user._id });
+    if (!chat) return res.status(404).json({ error: 'Session not found or access denied' });
 
     res.json({
       sessionId: chat._id,
@@ -229,15 +199,12 @@ router.get('/history', protect, async (req, res) => {
       updatedAt: chat.updatedAt,
     });
   } catch (error) {
-    logger.logApiError(error, {
-      route: 'GET /api/chat/history',
-      userId: req.user?._id
-    });
+    logger.logApiError(error, { route: 'GET /api/chat/history', userId: req.user?._id });
     res.status(500).json({ error: 'Failed to fetch history' });
   }
 });
 
-// GET /api/chat/sessions - List all sessions
+// GET /api/chat/sessions
 // PROTECTED
 router.get('/sessions', protect, async (req, res) => {
   try {
@@ -256,10 +223,7 @@ router.get('/sessions', protect, async (req, res) => {
       }))
     );
   } catch (error) {
-    logger.logApiError(error, {
-      route: 'GET /api/chat/sessions',
-      userId: req.user?._id
-    });
+    logger.logApiError(error, { route: 'GET /api/chat/sessions', userId: req.user?._id });
     res.status(500).json({ error: 'Failed to fetch sessions' });
   }
 });
@@ -269,33 +233,16 @@ router.get('/sessions', protect, async (req, res) => {
 router.post('/complete', protect, chatLimiter, async (req, res) => {
   try {
     const { message, sessionId } = req.body;
-
     const trimmed = message?.trim();
-
-    if (!trimmed) {
-      return res.status(400).json({ error: 'Message cannot be empty' });
-    }
-
-    if (trimmed.length > MAX_MESSAGE_LENGTH) {
-      return res.status(400).json({
-        error: `Message is too long (max ${MAX_MESSAGE_LENGTH} characters)`
-      });
-    }
+    if (!trimmed) return res.status(400).json({ error: 'Message cannot be empty' });
+    if (trimmed.length > MAX_MESSAGE_LENGTH)
+      return res.status(400).json({ error: `Message is too long (max ${MAX_MESSAGE_LENGTH} characters)` });
 
     let chat = null;
-    if (sessionId && mongoose.Types.ObjectId.isValid(sessionId)) {
-      chat = await Chat.findOne({
-        _id: sessionId,
-        userId: req.user._id
-      });
-    }
+    if (sessionId && mongoose.Types.ObjectId.isValid(sessionId))
+      chat = await Chat.findOne({ _id: sessionId, userId: req.user._id });
 
-    if (!chat) {
-      chat = new Chat({
-        messages: [],
-        userId: req.user._id
-      });
-    }
+    if (!chat) chat = new Chat({ messages: [], userId: req.user._id });
 
     if (chat.messages.length >= MESSAGE_LIMIT) {
       return res.status(400).json({
@@ -305,64 +252,37 @@ router.post('/complete', protect, chatLimiter, async (req, res) => {
       });
     }
 
-    chat.messages.push({
-      role: 'user',
-      content: trimmed,
-      timestamp: new Date(),
-    });
+    chat.messages.push({ role: 'user', content: trimmed, timestamp: new Date() });
     await chat.save();
 
     const apiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
-
     const completion = await createChatCompletion(apiMessages);
     const responseContent = completion.choices[0].message.content;
 
-    chat.messages.push({
-      role: 'assistant',
-      content: responseContent,
-      timestamp: new Date(),
-    });
+    chat.messages.push({ role: 'assistant', content: responseContent, timestamp: new Date() });
     await chat.save();
 
-    res.json({
-      sessionId: chat._id,
-      response: responseContent,
-      messages: chat.messages,
-    });
+    res.json({ sessionId: chat._id, response: responseContent, messages: chat.messages });
   } catch (error) {
-    logger.logApiError(error, {
-      route: 'POST /api/chat/complete',
-      userId: req.user?._id
-    });
+    logger.logApiError(error, { route: 'POST /api/chat/complete', userId: req.user?._id });
     res.status(500).json({ error: 'Failed to generate completion' });
   }
 });
 
-// DELETE /api/chat/history/:id - Delete conversation
+// DELETE /api/chat/history/:id
 // PROTECTED
 router.delete('/history/:id', protect, async (req, res) => {
   try {
     const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: 'Invalid session ID format' });
-    }
 
-    const chat = await Chat.findOneAndDelete({
-      _id: id,
-      userId: req.user._id
-    });
-
-    if (!chat) {
-      return res.status(404).json({ error: 'Session not found or access denied' });
-    }
+    const chat = await Chat.findOneAndDelete({ _id: id, userId: req.user._id });
+    if (!chat) return res.status(404).json({ error: 'Session not found or access denied' });
 
     res.json({ success: true, message: 'Session deleted successfully' });
   } catch (error) {
-    logger.logApiError(error, {
-      route: 'DELETE /api/chat/history/:id',
-      userId: req.user?._id
-    });
+    logger.logApiError(error, { route: 'DELETE /api/chat/history/:id', userId: req.user?._id });
     res.status(500).json({ error: 'Failed to delete session' });
   }
 });
