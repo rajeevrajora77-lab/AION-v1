@@ -59,7 +59,8 @@ const Login = () => {
               placeholder="you@example.com"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors"
+              disabled={loading}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors disabled:opacity-60"
             />
           </div>
 
@@ -75,36 +76,21 @@ const Login = () => {
               placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors"
+              disabled={loading}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors disabled:opacity-60"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl py-3.5 transition-colors"
+            className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl py-3.5 transition-colors touch-manipulation"
           >
-            {loading ? 'Signing in...' : 'Sign in'}
+            {loading ? 'Signing in\u2026' : 'Sign in'}
           </button>
         </form>
 
-        {/* Divider */}
-        <div className="flex items-center my-5">
-          <div className="flex-1 border-t border-gray-700" />
-          <span className="mx-3 text-gray-500 text-xs">or</span>
-          <div className="flex-1 border-t border-gray-700" />
-        </div>
-
-        {/* Guest access button */}
-        <button
-          type="button"
-          onClick={() => navigate('/dashboard')}
-          className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-xl py-3.5 transition-colors border border-gray-700"
-        >
-          Continue as Guest
-        </button>
-
-        <p className="text-center text-sm text-gray-500 mt-5">
+        <p className="text-center text-sm text-gray-500 mt-6">
           No account?{' '}
           <Link to="/signup" className="text-blue-400 hover:text-blue-300 font-medium">
             Sign up
