@@ -20,7 +20,6 @@ dotenv.config();
 // ============================================================================
 const hasLlmKey = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
 
-// ALL required env vars including both JWT secrets
 const requiredEnvVars = [
   'FRONTEND_URL',
   'JWT_SECRET',
@@ -41,7 +40,6 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-// Validate JWT secrets are DIFFERENT
 if (process.env.JWT_SECRET === process.env.JWT_REFRESH_SECRET) {
   logger.error('CRITICAL: JWT_SECRET and JWT_REFRESH_SECRET must be DIFFERENT values!');
   process.exit(1);
@@ -71,26 +69,58 @@ app.use(
 );
 
 // ============================================================================
-// PHASE 4: CORS FIX — explicit allowlist, throw error on blocked origins
+// FIX: CORS — build allowlist dynamically from FRONTEND_URL env var
+// This prevents CORS blocking when the deployed URL changes across environments.
+// Static known origins are kept as a base; FRONTEND_URL is always injected.
 // ============================================================================
-const allowedOrigins = [
+
+// Base static origins (known production domains)
+const staticOrigins = [
   'https://chat.rajora.co.in',
   'https://rajora.co.in',
   'https://www.rajora.co.in',
 ];
 
+// Dynamically include FRONTEND_URL from env (handles Vercel, Render, custom domains)
+const envFrontendUrls = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((u) => u.trim())
+  .filter(Boolean);
+
+// Merge and deduplicate
+const allowedOrigins = [...new Set([...staticOrigins, ...envFrontendUrls])];
+
+// In non-production, also allow localhost variants
 if (!IS_PRODUCTION) {
-  allowedOrigins.push('http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173');
+  allowedOrigins.push(
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:4173'
+  );
 }
+
+logger.info('CORS allowed origins: ' + allowedOrigins.join(', '));
 
 const corsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, Postman, server-to-server)
     if (!origin) return callback(null, true);
+
+    // Exact match
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    // EXPLICIT error — not silent false
+
+    // Allow Vercel preview deployments (*.vercel.app) in non-production
+    if (!IS_PRODUCTION && origin.endsWith('.vercel.app')) {
+      return callback(null, true);
+    }
+
+    // Allow Render preview deployments (*.onrender.com) in non-production
+    if (!IS_PRODUCTION && origin.endsWith('.onrender.com')) {
+      return callback(null, true);
+    }
+
     logger.warn('CORS blocked request from origin: ' + origin);
     return callback(new Error('CORS: Origin not allowed: ' + origin), false);
   },
@@ -103,6 +133,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// Explicitly handle preflight for all routes
+app.options('*', cors(corsOptions));
 
 // Request logging
 app.use(requestLogger);
@@ -170,7 +203,6 @@ const connectWithRetry = async (attempt = 1, maxAttempts = 3) => {
       await new Promise((resolve) => setTimeout(resolve, 3000));
       return connectWithRetry(attempt + 1, maxAttempts);
     }
-    // All attempts failed — HARD FAIL
     logger.error('CRITICAL: MongoDB connection failed after ' + maxAttempts + ' attempts. Server cannot start without database.');
     process.exit(1);
   }
@@ -184,7 +216,6 @@ mongoose.connection.on('disconnected', () => {
   logger.warn('MongoDB disconnected — attempting reconnect...');
 });
 
-// Connect to MongoDB before starting server
 await connectWithRetry();
 
 // ============================================================================
