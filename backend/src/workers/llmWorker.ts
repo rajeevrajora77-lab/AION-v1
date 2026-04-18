@@ -45,3 +45,4 @@ llmWorker.on('completed', (job: Job) => {
 llmWorker.on('failed', (job: Job | undefined, err: Error) => {
   if (job) logger.error(`Job failed: ${job.id}`, { error: err.message });
 });
+ 
