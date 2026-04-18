@@ -4,7 +4,8 @@ import { getRedis } from '../config/redis';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
 
-export const rawOpenaiClient = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+// Use a placeholder if OPENAI_API_KEY is not set; calls will fail gracefully at request time
+export const rawOpenaiClient = new OpenAI({ apiKey: env.OPENAI_API_KEY || 'sk-placeholder-not-set' });
 
 const MAX_JOB_TOKENS = 30000; // Hard threshold guard
 
@@ -14,21 +15,25 @@ export const openaiClient = {
       async create(params: any, jobId: string = 'global') {
         const redis = getRedis();
         const costKey = `job_tokens:${jobId}`;
-        
+
         // 1. Guard check BEFORE dispatch
-        const currentUsage = parseInt(await redis.get(costKey) || '0', 10);
-        if (currentUsage > MAX_JOB_TOKENS) {
+        if (redis) {
+          const currentUsage = parseInt(await redis.get(costKey) || '0', 10);
+          if (currentUsage > MAX_JOB_TOKENS) {
             logger.warn(`Token limits exceeded for job ${jobId}. (${currentUsage})`);
             throw new AppError('Hard Token Cost Limiter Exceeded. Terminating early.', 429);
+          }
         }
 
         const response = await rawOpenaiClient.chat.completions.create(params);
-        
+
         // 2. Intercept and accumulate AFTER dispatch
-        const tokensUsed = response.usage?.total_tokens || 0;
-        await redis.incrby(costKey, tokensUsed);
-        // Expiry cleanup after 1 hour
-        await redis.expire(costKey, 3600);
+        if (redis) {
+          const tokensUsed = (response as any).usage?.total_tokens || 0;
+          await redis.incrby(costKey, tokensUsed);
+          // Expiry cleanup after 1 hour
+          await redis.expire(costKey, 3600);
+        }
 
         return response;
       }
