@@ -16,10 +16,18 @@ import logger from './utils/logger.js';
 dotenv.config();
 
 // ============================================================================
-// ENVIRONMENT VALIDATION
+// PHASE 1: ENVIRONMENT VALIDATION — HARD FAIL ON MISSING VARS
 // ============================================================================
 const hasLlmKey = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
-const requiredEnvVars = ['FRONTEND_URL', 'JWT_SECRET'];
+
+// ALL required env vars including both JWT secrets
+const requiredEnvVars = [
+  'FRONTEND_URL',
+  'JWT_SECRET',
+  'JWT_REFRESH_SECRET',
+  'MONGODB_URI',
+];
+
 const missingEnvVars = requiredEnvVars.filter((key) => !process.env[key]);
 
 if (!hasLlmKey) {
@@ -33,7 +41,13 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-logger.info('All required environment variables are set');
+// Validate JWT secrets are DIFFERENT
+if (process.env.JWT_SECRET === process.env.JWT_REFRESH_SECRET) {
+  logger.error('CRITICAL: JWT_SECRET and JWT_REFRESH_SECRET must be DIFFERENT values!');
+  process.exit(1);
+}
+
+logger.info('All required environment variables are set and valid');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -56,25 +70,29 @@ app.use(
   })
 );
 
-// CORS — allow chat.rajora.co.in (and www/apex for future use)
+// ============================================================================
+// PHASE 4: CORS FIX — explicit allowlist, throw error on blocked origins
+// ============================================================================
+const allowedOrigins = [
+  'https://chat.rajora.co.in',
+  'https://rajora.co.in',
+  'https://www.rajora.co.in',
+];
+
+if (!IS_PRODUCTION) {
+  allowedOrigins.push('http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173');
+}
+
 const corsOptions = {
   origin: (origin, callback) => {
-    const allowedOrigins = [
-      'https://chat.rajora.co.in',
-      'https://rajora.co.in',
-      'https://www.rajora.co.in',
-    ];
-
-    if (!IS_PRODUCTION) {
-      allowedOrigins.push('http://localhost:3000', 'http://localhost:5173');
+    // Allow requests with no origin (mobile apps, Postman, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
     }
-
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      // Return clean 403 instead of throwing an error
-      callback(null, false);
-    }
+    // EXPLICIT error — not silent false
+    logger.warn('CORS blocked request from origin: ' + origin);
+    return callback(new Error('CORS: Origin not allowed: ' + origin), false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -83,12 +101,13 @@ const corsOptions = {
   maxAge: 3600,
   optionsSuccessStatus: 200,
 };
+
 app.use(cors(corsOptions));
 
 // Request logging
 app.use(requestLogger);
 
-// Global rate limiting — BEFORE body parsing to prevent memory exhaustion
+// Global rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -108,9 +127,10 @@ const limiter = rateLimit({
     });
   },
 });
+
 app.use(limiter);
 
-// Body parsing — AFTER rate limiter, with reduced size limit (1MB, not 10MB)
+// Body parsing
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
@@ -134,46 +154,53 @@ app.get('/', (req, res) => {
 });
 
 // ============================================================================
-// MONGODB CONNECTION
+// PHASE 3: MONGODB CONNECTION — HARD FAIL with retry
 // ============================================================================
-if (process.env.MONGODB_URI) {
-  mongoose
-    .connect(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 5000,
+const connectWithRetry = async (attempt = 1, maxAttempts = 3) => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
-    })
-    .then(() => {
-      logger.info('MongoDB connected successfully');
-    })
-    .catch((err) => {
-      logger.error('MongoDB connection failed: ' + err.message);
-      logger.warn('Server will continue without database.');
     });
-  mongoose.connection.on('error', (err) => {
-    logger.error('MongoDB connection error: ' + err.message);
-  });
-  mongoose.connection.on('disconnected', () => {
-    logger.warn('MongoDB disconnected');
-  });
-} else {
-  logger.warn('MONGODB_URI not set. Running without database.');
-}
+    logger.info('MongoDB connected successfully');
+  } catch (err) {
+    logger.error(`MongoDB connection attempt ${attempt}/${maxAttempts} failed: ${err.message}`);
+    if (attempt < maxAttempts) {
+      logger.info(`Retrying in 3 seconds...`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      return connectWithRetry(attempt + 1, maxAttempts);
+    }
+    // All attempts failed — HARD FAIL
+    logger.error('CRITICAL: MongoDB connection failed after ' + maxAttempts + ' attempts. Server cannot start without database.');
+    process.exit(1);
+  }
+};
+
+mongoose.connection.on('error', (err) => {
+  logger.error('MongoDB runtime error: ' + err.message);
+});
+
+mongoose.connection.on('disconnected', () => {
+  logger.warn('MongoDB disconnected — attempting reconnect...');
+});
+
+// Connect to MongoDB before starting server
+await connectWithRetry();
 
 // ============================================================================
-// API ROUTES — No try/catch. If a route module fails to load, the server MUST crash.
-// A server running without auth routes is worse than a server not starting at all.
+// API ROUTES
 // ============================================================================
 app.use('/api/chat', chatRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use(healthRoutes);
+
 logger.info('All routes loaded successfully');
 
 // ============================================================================
 // ERROR HANDLERS
 // ============================================================================
-// 404 handler — must be after all routes
 app.use((req, res) => {
   res.status(404).json({
     error: 'Route not found',
@@ -182,11 +209,10 @@ app.use((req, res) => {
   });
 });
 
-// Global error handler — uses the imported errorHandler middleware
 app.use(errorHandler);
 
 // ============================================================================
-// GRACEFUL SHUTDOWN — store HTTP server reference
+// GRACEFUL SHUTDOWN
 // ============================================================================
 const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info('='.repeat(50));
@@ -210,7 +236,6 @@ const gracefulShutdown = async (signal) => {
     }
     process.exit(0);
   });
-  // Force shutdown after 10s if graceful fails
   setTimeout(() => {
     logger.error('Forced shutdown after timeout');
     process.exit(1);
@@ -219,7 +244,6 @@ const gracefulShutdown = async (signal) => {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
 process.on('unhandledRejection', (reason, promise) => {
   logger.error('Unhandled Rejection', { reason: String(reason) });
 });
