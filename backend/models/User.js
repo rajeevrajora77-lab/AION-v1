@@ -99,7 +99,6 @@ UserSchema.index({ email: 1 });
 UserSchema.index({ isActive: 1 });
 UserSchema.index({ createdAt: -1 });
 
-// ============================================================================
 // PRE-SAVE MIDDLEWARE - Hash Password
 // ============================================================================
 UserSchema.pre('save', async function (next) {
