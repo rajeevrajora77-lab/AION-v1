@@ -1,5 +1,4 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { useAuthStore } from '../store/authStore';
 import api from '../services/api';
 
 const CHAT_SESSION_KEY = 'aion-chat-session-id';
@@ -18,16 +17,15 @@ export function ChatProvider({ children }) {
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
 
-  // -------------------------------------------------------------------------
-  // loadSessions — only meaningful for authenticated users.
-  // Guests have no server-side sessions; return [] silently.
-  // -------------------------------------------------------------------------
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // -----------------------------------------------------------------------
+  // loadSessions — fetch user’s session list (authenticated only)
+  // -----------------------------------------------------------------------
   const loadSessions = useCallback(async () => {
-    const token = useAuthStore.getState().token;
-    if (!token) {
-      setSessions([]);
-      return [];
-    }
     try {
       const { data } = await api.get('/chat/sessions');
       setSessions(Array.isArray(data) ? data : []);
@@ -38,14 +36,11 @@ export function ChatProvider({ children }) {
     }
   }, []);
 
-  // -------------------------------------------------------------------------
-  // loadHistory — only meaningful for authenticated users.
-  // Guests have no persisted history; skip the API call and return false.
-  // -------------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // loadHistory — restore a specific session (authenticated only)
+  // -----------------------------------------------------------------------
   const loadHistory = useCallback(async (targetSessionId) => {
-    const token = useAuthStore.getState().token;
-    // No session id OR not logged in — nothing to load
-    if (!targetSessionId || !token) return false;
+    if (!targetSessionId) return false;
     try {
       const { data } = await api.get('/chat/history', {
         params: { sessionId: targetSessionId },
@@ -60,26 +55,14 @@ export function ChatProvider({ children }) {
     }
   }, []);
 
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // -------------------------------------------------------------------------
-  // On mount: restore session for authenticated users only.
-  // Guests start fresh every time — no 401 calls are made.
-  // -------------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // On mount: restore last session from localStorage for logged-in user.
+  // The api interceptor already attaches the JWT — if it’s missing the
+  // user will be redirected to /login by the ProtectedRoute wrapper before
+  // this context is even rendered, so no guest guard is needed here.
+  // -----------------------------------------------------------------------
   useEffect(() => {
     const init = async () => {
-      const token = useAuthStore.getState().token;
-
-      // Guest user — nothing to restore, start with empty chat
-      if (!token) {
-        localStorage.removeItem(CHAT_SESSION_KEY);
-        return;
-      }
-
-      // Authenticated user — try to restore last session from localStorage
       const cachedSessionId = localStorage.getItem(CHAT_SESSION_KEY);
       if (cachedSessionId) {
         const loaded = await loadHistory(cachedSessionId);
@@ -87,11 +70,11 @@ export function ChatProvider({ children }) {
           await loadSessions();
           return;
         }
-        // Cached session no longer valid (deleted, expired) — clear it
+        // Cached session no longer valid (deleted / expired) — clear it
         localStorage.removeItem(CHAT_SESSION_KEY);
       }
 
-      // No cached session — load session list and restore most recent
+      // No cached session — load list and restore most recent
       const userSessions = await loadSessions();
       if (userSessions.length > 0) {
         await loadHistory(userSessions[0].sessionId);
@@ -100,11 +83,10 @@ export function ChatProvider({ children }) {
     init();
   }, [loadHistory, loadSessions]);
 
-  // -------------------------------------------------------------------------
-  // handleSendMessage
-  // Works for both guests (no token, no sessionId returned) and
-  // authenticated users (token attached, sessionId persisted).
-  // -------------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // handleSendMessage — POST to /api/chat (auth required)
+  // JWT is attached automatically by the api interceptor in services/api.js
+  // -----------------------------------------------------------------------
   const handleSendMessage = async (e) => {
     e?.preventDefault();
     if (!input.trim() || isStreaming) return;
@@ -112,41 +94,36 @@ export function ChatProvider({ children }) {
     setError(null);
     const userMessage = input.trim();
     setInput('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    const newMessages = [...messages, { role: 'user', content: userMessage }];
-    setMessages(newMessages);
+    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setIsStreaming(true);
-
-    const token = useAuthStore.getState().token;
 
     try {
       abortControllerRef.current = new AbortController();
 
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+      // Read token from the api instance default headers
+      const authHeader = api.defaults.headers.common['Authorization'] || '';
 
       const body = { message: userMessage };
-      // Only send sessionId when authenticated (backend ignores it for guests)
-      if (token && sessionId) body.sessionId = sessionId;
+      if (sessionId) body.sessionId = sessionId;
 
       const response = await fetch(`${api.defaults.baseURL}/chat`, {
         method: 'POST',
-        headers,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authHeader ? { Authorization: authHeader } : {}),
+        },
         body: JSON.stringify(body),
         signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errText}`);
       }
 
-      if (!response.body) {
-        throw new Error('No response body - streaming not supported');
-      }
+      if (!response.body) throw new Error('No response body — streaming not supported');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -169,16 +146,16 @@ export function ChatProvider({ children }) {
 
           try {
             const parsed = JSON.parse(data);
+
             if (parsed.done) {
-              // sessionId is only returned for authenticated users
               if (parsed.sessionId) {
                 setSessionId(parsed.sessionId);
                 localStorage.setItem(CHAT_SESSION_KEY, String(parsed.sessionId));
-                // Refresh sidebar session list
-                loadSessions();
+                loadSessions(); // refresh sidebar
               }
               break;
             }
+
             if (parsed.content) {
               setMessages((prev) => {
                 const updated = [...prev];
@@ -187,7 +164,7 @@ export function ChatProvider({ children }) {
                   isFirst = false;
                 } else {
                   const last = updated[updated.length - 1];
-                  if (last.role === 'assistant') {
+                  if (last?.role === 'assistant') {
                     last.content += parsed.content;
                   } else {
                     updated.push({ role: 'assistant', content: parsed.content });
@@ -196,30 +173,27 @@ export function ChatProvider({ children }) {
                 return updated;
               });
             }
+
             if (parsed.error) {
               setError(parsed.error);
               break;
             }
           } catch (parseErr) {
-            console.warn('Failed to parse SSE data:', data, parseErr);
+            console.warn('Failed to parse SSE chunk:', data, parseErr);
           }
         }
       }
-
-      setIsStreaming(false);
     } catch (err) {
-      console.error('Chat error:', err);
       if (err.name !== 'AbortError') {
         setError(err.message || 'Failed to send message. Please try again.');
       }
+    } finally {
       setIsStreaming(false);
     }
   };
 
   const handleStopStream = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    abortControllerRef.current?.abort();
     setIsStreaming(false);
   };
 
