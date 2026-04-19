@@ -10,7 +10,7 @@ const Help = lazy(() => import('./pages/Help.jsx'));
 const SettingsLayout = lazy(() => import('./pages/settings/SettingsLayout.jsx'));
 const SettingsGeneral = lazy(() => import('./pages/settings/SettingsGeneral.jsx'));
 const SettingsPersonalization = lazy(() => import('./pages/settings/SettingsPersonalization.jsx'));
-const SettingsAPIKeys = lazy(() => import('./pages/settings/SettingsAPIKeys.jsx'));
+
 
 function AuthBootstrap({ children }) {
   const token = useAuthStore((s) => s.token);
@@ -54,7 +54,7 @@ function App() {
             <Route index element={<SettingsGeneral />} />
             <Route path="general" element={<SettingsGeneral />} />
             <Route path="personalization" element={<SettingsPersonalization />} />
-            <Route path="api-keys" element={<SettingsAPIKeys />} />
+
           </Route>
 
           {/* Default → dashboard */}

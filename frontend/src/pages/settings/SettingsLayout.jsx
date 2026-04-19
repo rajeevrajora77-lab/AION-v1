@@ -22,9 +22,6 @@ export default function SettingsLayout() {
           <NavLink to="/settings/personalization" className={tabClass}>
             Personalization
           </NavLink>
-          <NavLink to="/settings/api-keys" className={tabClass}>
-            API Keys
-          </NavLink>
         </nav>
       </div>
       <main className="max-w-3xl mx-auto px-4 md:px-8 py-8">
