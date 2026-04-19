@@ -20,11 +20,8 @@ function Chat() {
   return (
     <div className="bg-[#0f0f0f] text-white flex flex-col flex-1 min-h-0 overflow-hidden">
       {/* Minimal header */}
-      <header className="flex h-12 md:h-14 border-b border-[#262626] items-center px-4 md:px-6 justify-between flex-shrink-0">
+      <header className="flex h-12 md:h-14 border-b border-[#262626] items-center px-4 md:px-6 flex-shrink-0">
         <span className="text-sm text-gray-400 font-medium">AION</span>
-        <span className="text-xs text-gray-500 truncate max-w-[50%]">
-          {sessionId ? `Session ${String(sessionId).slice(0, 8)}…` : 'New chat'}
-        </span>
       </header>
 
       {/* Messages area */}
