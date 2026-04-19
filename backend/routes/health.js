@@ -13,11 +13,18 @@ router.get('/health', async (req, res) => {
   };
 
   try {
-    // Check MongoDB connection
+    // Check MongoDB
     if (mongoose.connection.readyState === 1) {
       healthcheck.database = 'connected';
     } else {
       healthcheck.database = 'disconnected';
+      healthcheck.status = 'degraded';
+    }
+
+    // Check LLM API key — be honest about whether chat can actually work
+    const hasLLMKey = !!(process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY);
+    healthcheck.llm = hasLLMKey ? 'configured' : 'missing';
+    if (!hasLLMKey) {
       healthcheck.status = 'degraded';
     }
 

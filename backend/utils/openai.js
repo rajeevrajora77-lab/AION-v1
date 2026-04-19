@@ -84,7 +84,7 @@ export const MODELS = {
 // SLIDING WINDOW — permanent fix for unbounded message history
 // System messages always preserved; last N conversational turns kept
 // ============================================================
-const CONTEXT_WINDOW_SIZE = parseInt(process.env.LLM_CONTEXT_WINDOW) || 20;
+const CONTEXT_WINDOW_SIZE = parseInt(process.env.LLM_CONTEXT_WINDOW) || 6;
 export function applyContextWindow(messages) {
   if (!Array.isArray(messages) || messages.length === 0) return messages;
   const systemMessages = messages.filter((m) => m.role === 'system');

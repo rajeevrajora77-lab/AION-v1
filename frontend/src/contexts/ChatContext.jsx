@@ -18,13 +18,13 @@ export function ChatProvider({ children }) {
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   // -----------------------------------------------------------------------
-  // loadSessions — fetch user’s session list (authenticated only)
+  // loadSessions — fetch user's chat list from DB
   // -----------------------------------------------------------------------
   const loadSessions = useCallback(async () => {
     try {
@@ -38,7 +38,7 @@ export function ChatProvider({ children }) {
   }, []);
 
   // -----------------------------------------------------------------------
-  // loadHistory — restore a specific session (authenticated only)
+  // loadHistory — restore a specific session
   // -----------------------------------------------------------------------
   const loadHistory = useCallback(async (targetSessionId) => {
     if (!targetSessionId) return false;
@@ -57,10 +57,28 @@ export function ChatProvider({ children }) {
   }, []);
 
   // -----------------------------------------------------------------------
-  // On mount: restore last session from localStorage for logged-in user.
-  // The api interceptor already attaches the JWT — if it’s missing the
-  // user will be redirected to /login by the ProtectedRoute wrapper before
-  // this context is even rendered, so no guest guard is needed here.
+  // deleteSession — remove a chat session
+  // -----------------------------------------------------------------------
+  const deleteSession = useCallback(async (targetSessionId) => {
+    if (!targetSessionId) return;
+    try {
+      await api.delete(`/chat/${targetSessionId}`);
+      // If we deleted the active session, clear the view
+      if (String(sessionId) === String(targetSessionId)) {
+        setMessages([]);
+        setSessionId(null);
+        setError(null);
+        localStorage.removeItem(CHAT_SESSION_KEY);
+      }
+      // Refresh sidebar
+      await loadSessions();
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+    }
+  }, [sessionId, loadSessions]);
+
+  // -----------------------------------------------------------------------
+  // On mount: restore last session
   // -----------------------------------------------------------------------
   useEffect(() => {
     const init = async () => {
@@ -71,7 +89,6 @@ export function ChatProvider({ children }) {
           await loadSessions();
           return;
         }
-        // Cached session no longer valid (deleted / expired) — clear it
         localStorage.removeItem(CHAT_SESSION_KEY);
       }
 
@@ -85,8 +102,13 @@ export function ChatProvider({ children }) {
   }, [loadHistory, loadSessions]);
 
   // -----------------------------------------------------------------------
-  // handleSendMessage — POST to /api/chat (auth required)
-  // JWT is attached automatically by the api interceptor in services/api.js
+  // handleSendMessage — POST /api/chat (SSE streaming)
+  //
+  // SESSION RULES:
+  //   - If sessionId == null → backend creates new chat
+  //   - If sessionId exists → backend continues existing chat
+  //   - NEVER create empty chats
+  //   - Title is set server-side from first user message
   // -----------------------------------------------------------------------
   const handleSendMessage = async (e) => {
     e?.preventDefault();
@@ -97,15 +119,14 @@ export function ChatProvider({ children }) {
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
+    // Optimistic UI — show user message immediately
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setIsStreaming(true);
 
     try {
       abortControllerRef.current = new AbortController();
 
-      // FIX: Read token directly from auth store — the axios interceptor sets
-      // headers per-request on config.headers, NOT on api.defaults.headers.common.
-      // Reading from defaults always returned '' → 401 on every chat request.
+      // Read token from auth store
       const token = useAuthStore.getState().token;
       const authHeader = token ? `Bearer ${token}` : '';
 
@@ -152,10 +173,12 @@ export function ChatProvider({ children }) {
             const parsed = JSON.parse(data);
 
             if (parsed.done) {
+              // Session created/continued — store the sessionId
               if (parsed.sessionId) {
                 setSessionId(parsed.sessionId);
                 localStorage.setItem(CHAT_SESSION_KEY, String(parsed.sessionId));
-                loadSessions(); // refresh sidebar
+                // Refresh sidebar to show the new/updated chat
+                loadSessions();
               }
               break;
             }
@@ -183,7 +206,7 @@ export function ChatProvider({ children }) {
               break;
             }
           } catch (parseErr) {
-            console.warn('Failed to parse SSE chunk:', data, parseErr);
+            console.warn('Failed to parse SSE chunk:', data);
           }
         }
       }
@@ -201,6 +224,8 @@ export function ChatProvider({ children }) {
     setIsStreaming(false);
   };
 
+  // New Chat — clears state, sets sessionId to null
+  // Does NOT create anything in DB — that happens on first message
   const handleNewChat = () => {
     setMessages([]);
     setSessionId(null);
@@ -217,7 +242,6 @@ export function ChatProvider({ children }) {
 
   const value = {
     messages,
-    setMessages,
     input,
     setInput,
     isStreaming,
@@ -228,6 +252,7 @@ export function ChatProvider({ children }) {
     textareaRef,
     loadSessions,
     loadHistory,
+    deleteSession,
     handleSendMessage,
     handleStopStream,
     handleNewChat,

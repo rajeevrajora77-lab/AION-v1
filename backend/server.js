@@ -5,8 +5,6 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import rateLimit from 'express-rate-limit';
 import chatRoutes from './routes/chat.js';
-import searchRoutes from './routes/search.js';
-import voiceRoutes from './routes/voice.js';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -223,8 +221,6 @@ await connectWithRetry();
 // ============================================================================
 app.use('/api/chat', chatRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/search', searchRoutes);
-app.use('/api/voice', voiceRoutes);
 app.use(healthRoutes);
 
 logger.info('All routes loaded successfully');

@@ -75,14 +75,6 @@ export default function UserAccountMenu() {
             Settings
           </Link>
           <Link
-            to="/settings/api-keys"
-            role="menuitem"
-            className="block px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-800"
-            onClick={() => setOpen(false)}
-          >
-            API Keys
-          </Link>
-          <Link
             to="/help"
             role="menuitem"
             className="block px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-800"

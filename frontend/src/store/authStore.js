@@ -90,8 +90,14 @@ export const useAuthStore = create(
         user: state.user,
         token: state.token,
         refreshToken: state.refreshToken,
-        isAuthenticated: state.isAuthenticated,
+        // DO NOT persist isAuthenticated — derive from token presence
       }),
+      onRehydrateStorage: () => (state) => {
+        // After hydration: set isAuthenticated based on whether token exists
+        if (state) {
+          state.isAuthenticated = !!state.token;
+        }
+      },
     }
   )
 );
