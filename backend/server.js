@@ -77,6 +77,9 @@ const staticOrigins = [
   'https://chat.rajora.co.in',
   'https://rajora.co.in',
   'https://www.rajora.co.in',
+  'https://rajora.live',
+  'https://www.rajora.live',
+  'https://chat.rajora.live',
 ];
 
 // Dynamically include FRONTEND_URL from env (handles Vercel, Render, custom domains)

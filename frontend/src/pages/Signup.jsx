@@ -155,7 +155,9 @@ function Signup() {
               name="password"
               value={formData.password}
               onChange={handleChange}
-              placeholder="••••••••"
+              placeholder="Enter your password"
+              autoComplete="new-password"
+              spellCheck="false"
               disabled={loading}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors disabled:opacity-60"
             />
@@ -173,7 +175,9 @@ function Signup() {
               name="confirmPassword"
               value={formData.confirmPassword}
               onChange={handleChange}
-              placeholder="••••••••"
+              placeholder="Confirm your password"
+              autoComplete="new-password"
+              spellCheck="false"
               disabled={loading}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-3.5 text-base border border-gray-700 focus:border-blue-500 focus:outline-none placeholder-gray-500 transition-colors disabled:opacity-60"
             />

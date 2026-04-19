@@ -73,7 +73,9 @@ const Login = () => {
               name="password"
               type="password"
               required
-              placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              spellCheck="false"
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               disabled={loading}

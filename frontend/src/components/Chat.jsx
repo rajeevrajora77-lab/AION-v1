@@ -2,6 +2,24 @@ import React from 'react';
 import MessageBubble from './MessageBubble';
 import { useChat } from '../contexts/ChatContext';
 
+// Loading skeleton for messages
+function MessageSkeleton() {
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {[1, 2, 3].map((i) => (
+        <div key={i} className={`flex w-full ${i % 2 === 0 ? 'justify-end' : 'justify-start gap-4'} mb-6`}>
+          {i % 2 !== 0 && <div className="w-8 h-8 rounded-md skeleton shrink-0" />}
+          <div className={`${i % 2 === 0 ? 'max-w-[60%]' : 'max-w-[75%]'}`}>
+            <div className="skeleton h-4 w-full mb-2" style={{ width: `${60 + i * 10}%` }} />
+            <div className="skeleton h-4 w-3/4 mb-2" />
+            {i % 2 !== 0 && <div className="skeleton h-4 w-1/2" />}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Chat() {
   const {
     messages,
@@ -28,14 +46,15 @@ function Chat() {
       <section className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 md:px-6 md:py-6 scroll-smooth min-h-0">
         <div className="max-w-3xl mx-auto w-full space-y-6 pt-4 pb-8">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center mt-24 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center mb-6 shadow-lg">
+            <div className="flex flex-col items-center justify-center mt-24 text-center animate-fade-in">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center mb-6 shadow-lg shadow-blue-500/20">
                 <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" />
                   <circle cx="12" cy="12" r="3" />
                 </svg>
               </div>
-              <p className="text-gray-400 text-sm">How can I help you today?</p>
+              <h2 className="text-lg font-semibold text-white mb-2">How can I help you today?</h2>
+              <p className="text-gray-500 text-sm max-w-sm">Ask me anything — I can help with coding, analysis, writing, research, and more.</p>
             </div>
           ) : (
             messages.map((msg, idx) => <MessageBubble key={idx} message={msg} />)
@@ -46,7 +65,7 @@ function Chat() {
 
       {/* Error bar */}
       {error && (
-        <div className="flex-shrink-0 px-4 py-3 bg-red-900/20 border-t border-red-900/50 text-red-400 text-xs md:text-sm">
+        <div className="flex-shrink-0 px-4 py-3 bg-red-900/20 border-t border-red-900/50 text-red-400 text-xs md:text-sm animate-fade-in">
           Error: {error}
         </div>
       )}
@@ -69,7 +88,7 @@ function Chat() {
             placeholder="Message AION… (Shift+Enter for newline)"
             disabled={isStreaming}
             rows={1}
-            className="flex-1 min-h-[44px] max-h-32 resize-none bg-[#171717] text-white rounded-xl px-4 py-3 text-base border border-[#262626] focus:border-blue-500 focus:outline-none placeholder-gray-500 leading-relaxed overscroll-contain"
+            className="flex-1 min-h-[44px] max-h-32 resize-none bg-[#171717] text-white rounded-xl px-4 py-3 text-base border border-[#262626] focus:border-blue-500 focus:outline-none placeholder-gray-500 leading-relaxed overscroll-contain transition-colors"
           />
 
           {isStreaming ? (

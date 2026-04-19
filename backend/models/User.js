@@ -86,6 +86,23 @@ const UserSchema = new mongoose.Schema(
       lastReset: { type: Date, default: Date.now },
       monthlyLimit: { type: Number, default: 1000 },
     },
+    // Data usage consent — compliance
+    dataConsentGiven: {
+      type: Boolean,
+      default: false,
+    },
+    dataConsentDate: {
+      type: Date,
+      default: null,
+    },
+    // Security — login session tracking (capped at 10)
+    loginSessions: [
+      {
+        ipAddress: { type: String },
+        userAgent: { type: String },
+        loginAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
     timestamps: true,

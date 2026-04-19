@@ -1,11 +1,15 @@
 import { useState, lazy, Suspense } from 'react';
 import { ChatProvider } from '../contexts/ChatContext';
+import { useAuthStore } from '../store/authStore';
 import AppSidebar from '../components/AppSidebar';
+import DataConsentModal from '../components/DataConsentModal';
 
 const Chat = lazy(() => import('../components/Chat'));
 
 function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const user = useAuthStore((s) => s.user);
+  const showConsent = user && user.dataConsentGiven !== true;
 
   return (
     <ChatProvider>
@@ -46,6 +50,9 @@ function Dashboard() {
           </Suspense>
         </div>
       </div>
+
+      {/* Data consent modal — shown once on first login */}
+      {showConsent && <DataConsentModal />}
     </ChatProvider>
   );
 }

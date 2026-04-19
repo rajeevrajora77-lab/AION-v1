@@ -24,6 +24,7 @@ function serializeUser(userDoc) {
     isActive: userDoc.isActive,
     createdAt: userDoc.createdAt,
     preferences: userDoc.preferences,
+    dataConsentGiven: userDoc.dataConsentGiven || false,
   };
 }
 
@@ -132,10 +133,22 @@ router.post('/login', authLimiter, async (req, res) => {
     user.lastLogin = new Date();
     await user.save();
 
+    // Track login session (IP + device) — security logging
+    const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+    await User.findByIdAndUpdate(user._id, {
+      $push: {
+        loginSessions: {
+          $each: [{ ipAddress, userAgent, loginAt: new Date() }],
+          $slice: -10, // Keep only last 10 sessions
+        },
+      },
+    });
+
     const token = user.generateAuthToken();
     const refreshToken = user.generateRefreshToken();
 
-    logger.logAuth('User logged in', { userId: user._id, email: user.email });
+    logger.logAuth('User logged in', { userId: user._id, email: user.email, ip: ipAddress });
 
     res.json({
       success: true,
@@ -217,7 +230,7 @@ router.get('/me', protect, async (req, res) => {
 // @access  Private
 router.put('/update-profile', protect, async (req, res) => {
   try {
-    const { name, email } = req.body;
+    const { name, email, dataConsentGiven } = req.body;
     const fieldsToUpdate = {};
 
     if (name) fieldsToUpdate.name = name;
@@ -227,6 +240,12 @@ router.put('/update-profile', protect, async (req, res) => {
         return res.status(400).json({ success: false, error: 'Email already in use' });
       }
       fieldsToUpdate.email = email;
+    }
+
+    // Data consent tracking
+    if (dataConsentGiven === true) {
+      fieldsToUpdate.dataConsentGiven = true;
+      fieldsToUpdate.dataConsentDate = new Date();
     }
 
     const user = await User.findByIdAndUpdate(

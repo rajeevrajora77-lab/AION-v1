@@ -7,6 +7,8 @@ import Signup from './pages/Signup.jsx';
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
 const Help = lazy(() => import('./pages/Help.jsx'));
+const Terms = lazy(() => import('./pages/Terms.jsx'));
+const About = lazy(() => import('./pages/About.jsx'));
 const SettingsLayout = lazy(() => import('./pages/settings/SettingsLayout.jsx'));
 const SettingsGeneral = lazy(() => import('./pages/settings/SettingsGeneral.jsx'));
 const SettingsPersonalization = lazy(() => import('./pages/settings/SettingsPersonalization.jsx'));
@@ -43,6 +45,10 @@ function App() {
             path="/signup"
             element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Signup />}
           />
+
+          {/* Public pages — no auth required */}
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/about" element={<About />} />
 
           {/* Dashboard = chat — authentication required */}
           <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" replace />} />
