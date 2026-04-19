@@ -46,15 +46,15 @@ function App() {
             element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Signup />}
           />
 
-          {/* Dashboard and chat - publicly accessible (no login required) */}
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/dashboard/search" element={<Dashboard />} />
-          <Route path="/dashboard/voice" element={<Dashboard />} />
-          <Route path="/profile" element={<Profile />} />
-          <Route path="/help" element={<Help />} />
+          {/* Dashboard and chat — authentication required */}
+          <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" replace />} />
+          <Route path="/dashboard/search" element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" replace />} />
+          <Route path="/dashboard/voice" element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" replace />} />
+          <Route path="/profile" element={isAuthenticated ? <Profile /> : <Navigate to="/login" replace />} />
+          <Route path="/help" element={isAuthenticated ? <Help /> : <Navigate to="/login" replace />} />
 
-          {/* Settings routes */}
-          <Route path="/settings" element={<SettingsLayout />}>
+          {/* Settings routes — authentication required */}
+          <Route path="/settings" element={isAuthenticated ? <SettingsLayout /> : <Navigate to="/login" replace />}>
             <Route index element={<SettingsGeneral />} />
             <Route path="general" element={<SettingsGeneral />} />
             <Route path="personalization" element={<SettingsPersonalization />} />

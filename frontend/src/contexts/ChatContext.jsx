@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import api from '../services/api';
+import { useAuthStore } from '../store/authStore';
 
 const CHAT_SESSION_KEY = 'aion-chat-session-id';
 
@@ -102,8 +103,11 @@ export function ChatProvider({ children }) {
     try {
       abortControllerRef.current = new AbortController();
 
-      // Read token from the api instance default headers
-      const authHeader = api.defaults.headers.common['Authorization'] || '';
+      // FIX: Read token directly from auth store — the axios interceptor sets
+      // headers per-request on config.headers, NOT on api.defaults.headers.common.
+      // Reading from defaults always returned '' → 401 on every chat request.
+      const token = useAuthStore.getState().token;
+      const authHeader = token ? `Bearer ${token}` : '';
 
       const body = { message: userMessage };
       if (sessionId) body.sessionId = sessionId;

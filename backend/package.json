@@ -2,11 +2,12 @@
   "name": "aion-backend",
   "version": "1.0.0",
   "description": "AION AI Backend Server",
-  "main": "dist/server.js",
+  "main": "server.js",
+  "type": "module",
   "scripts": {
-    "dev": "ts-node -r tsconfig-paths/register src/server.ts",
-    "build": "tsc || true",
-    "start": "node dist/server.js",
+    "dev": "node --watch server.js",
+    "build": "echo 'No build step needed — ESM server.js is the entry point'",
+    "start": "node server.js",
     "type-check": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
     "test": "jest"

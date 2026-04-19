@@ -136,7 +136,7 @@ UserSchema.methods.generateAuthToken = function () {
     email: this.email,
     role: this.role,
   };
-  const expiresIn = process.env.JWT_EXPIRE || '7d';
+  const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
   return jwt.sign(payload, secret, {
     expiresIn,
     issuer: 'aion-api',

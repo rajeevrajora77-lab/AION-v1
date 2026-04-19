@@ -4,9 +4,9 @@ services:
     env: node
     region: singapore
     plan: starter
-    buildCommand: cd backend && npm ci && npm run build
-    startCommand: cd backend && npm start
-    healthCheckPath: /api/health
+    buildCommand: cd backend && npm ci
+    startCommand: cd backend && node server.js
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: staging
@@ -16,9 +16,9 @@ services:
     env: node
     region: singapore
     plan: standard
-    buildCommand: cd backend && npm ci && npm run build
-    startCommand: cd backend && npm start
-    healthCheckPath: /api/health
+    buildCommand: cd backend && npm ci
+    startCommand: cd backend && node server.js
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
